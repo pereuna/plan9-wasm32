@@ -1,0 +1,177 @@
+#!/bin/bash
+# Plan9-wasm32's machine in headless Chromium (tools/test/wasmapp): its
+# serial port, #t/eia0, against sys/src/9/wasm32/test/NAME.out.  The tree
+# is built (tools/build, unless NOBUILD=1), the test programs too
+# (sys/src/9/wasm32/test/mkfile), and the page's site made in
+# build/test/site: the live image's page with a boot file system of
+# bootfs.proto and test.proto.
+#
+# - the kernel and programs: c2a (port/'s own test, no init), bootinfo,
+#   badblob, oldheader (BootInfo: docs/boot.md), echo, long (argv past
+#   4096 bytes), fork, forkloop (2000 forks), rc, rci, c3a (notes,
+#   rendezvous), failfork (a child without a Worker), rfmem, threads,
+#   preempt, rfmemloop, failhelper, failrfmem (rfork(RFMEM) undone),
+#   init (/boot/console: kbdfs, rc, äåö, DEL), procargs, notekill, fault
+# - the screen, keyboard and mouse: clock, keys, mouse, hello, dclock,
+#   bytes, rc3, rci3 (3c's tests), rioclock, riorc, boot (/boot/init as
+#   9front's: glenda's profile, rio, stats), ctrlv, touchbar, paste
+# - the disk (#S/sdW0, OPFS, kept across a reload): disk, diskdead
+# - libraries: crypto (libsec, libmp, libauthsrv), tls (devtls)
+# - WebAuthn (#ω): webauthn (the browser's virtual authenticator)
+# - the network, against tools/test/authsrv (the auth server, secstore,
+#   an rcpu relay): dp9ik, dp9iknoas, nettimeout, netre, rcpu, rcpuask,
+#   secstore, seckeys, sendq (backpressure)
+# - the page's plan9.ini: pageini
+#   PLAN9=... tools/test/run [NAME...]	all without NAMEs
+set -e -o pipefail
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
+t=$root/sys/src/9/wasm32/test
+h=$root/sys/src/cmd/3c/test/host3
+tree=$root/build/tree
+site=$root/build/test/site
+mkdir -p "$root/build/test"
+if [ -z "${NOBUILD:-}" ]; then
+	"$root/tools/build" >"$root/build/test/build.log" 2>&1 || { tail -20 "$root/build/test/build.log"; exit 1; }
+	TREE=$tree "$root/tools/native" 9/wasm32/test:all >"$root/build/test/native.log" 2>&1 || { tail -20 "$root/build/test/native.log"; exit 1; }
+fi
+rm -rf "$site"; mkdir -p "$site"
+cp "$root/build/live/index.html" "$root/build/live/platform.js" "$root/build/live/9wasm32.wasm" "$site/"
+"$root/tools/bootfs" "$tree" "$site/w3root.fs" "$tree/sys/src/9/wasm32/bootfs.proto" "$tree/sys/src/9/wasm32/test/test.proto" >/dev/null
+# what an interrupted run left (tools/serve, authsrv on these ports)
+for p in 18092 18093 18099; do
+	if (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then
+		echo "test: port $p is taken (an earlier run's tools/serve or authsrv?)" >&2; exit 1
+	fi
+done
+
+failed=
+run() {	# NAME ARGS [SEND [PAGEARGS]]: a failure noted, the others go on
+	echo "test: $1"
+	MASKPIDS=1 PAGEARGS="$4" HALTWAIT=${HALTWAIT:-60} SERIAL=1 EXPECTTAIL=1 EXPECT="${EXPECT:-$t/$1.out}" ARGS="$2" SEND="${3:-[]}" \
+		"$here/wasmapp" "$1" | tail -1 || failed="$failed $1"
+}
+want() { local n=$1; shift; [ $# = 0 ] || [[ " $* " == *" $n "* ]]; }
+rcjson() { python3 -c 'import json,sys; print(json.dumps(["/bin/rc", "-c", sys.argv[1]]))' "$1"; }
+names="$*"
+want c2a $names && run c2a '[]' '[]' '&noinit=1'
+# BootInfo (docs/boot.md): plan9.ini's lines in the environment, the framebuffer as *bootscreen, the
+# clock from its epoch; a blob for another ISA stops the kernel before anything
+want bootinfo $names && run bootinfo "$(rcjson "echo \$bitest; x=\`{cat '#ec/*bootscreen'}; echo \$x(1) \$x(2); t=\`{cat /dev/time}; test \$t(1) -gt 1759000000 && echo the clock is from BootInfo; echo done")" \
+	'[]' '&screen=640x480&conf=bitest%3Dhello%20world'
+# a blob for another ISA, the root's image or the framebuffer in memory the kernel hands out: refused, before anything;
+# an older v1 loader's shorter header (garbage past it, where rdbase would be): taken, the fields it lacks 0
+for bad in arch rd fb; do
+	want badblob $names && EXPECT=$t/badblob.out EXPECTJS="document.getElementById('eia0').textContent.includes('[halted: bootinfo: no blob')" run badblob '["/bin/echo", "never"]' '[]' "&bad=$bad"
+done
+want oldheader $names && EXPECT=$t/c2a.out run oldheader '[]' '[]' '&noinit=1&oldheader=1'
+want echo $names && run echo '["/bin/echo", "hello", "world"]'
+want long $names && run long "[\"/bin/echo\", \"$(printf '%06000d' 0 | tr 0 a)\"]"
+want fork $names && run fork '["/bin/fork"]'
+want forkloop $names && HALTWAIT=400 run forkloop '["/bin/forkloop", "2000"]'
+want rc $names && run rc '["/bin/rc", "-c", "echo hello from rc; x=(a b c); echo $#x; ls /bin/echo /bin/rc | wc -l; cat /rc/lib/rcmain | wc -l; echo done"]'
+want rci $names && run rci '["/bin/rc", "-i"]' '["echo hi\n", "ls /bin/echo /bin/rc | wc -l\n", "x=`{echo a b}; echo $#x\n", "cat nonexistent\n", "exit\n"]'
+want c3a $names && run c3a '["/bin/c3a"]'
+want failfork $names && run failfork '["/bin/c3a", "-f"]' '[]' '&failfork=1'
+want rfmem $names && run rfmem '["/bin/rfmem"]'
+want threads $names && run threads '["/bin/threads"]'
+want preempt $names && run preempt '["/bin/preempt"]'
+want rfmemloop $names && HALTWAIT=200 run rfmemloop '["/bin/rc", "-c", "for(i in 1 2 3 4 5 6 7 8 9 10) { threads >/dev/null; rfmem >/dev/null; preempt >/dev/null }; echo ten rounds; threads | echo the pipe closed; ~ $status *'"'"'write on closed pipe'"'"'* && echo threads ended by its note"]'
+want failhelper $names && run failhelper '["/bin/c3b"]' '[]' '&failhelper=1'
+want failrfmem $names && run failrfmem '["/bin/c3b"]' '[]' '&failrfmem=1'
+want init $names && run init '["/bin/rc", "/boot/console"]' '["echo hi\n", "echo äåö | wc -c\n", "sleep 100\n", "\u007f", "echo after the interrupt\n", "exit\n"]'
+want clock $names && DRAWS=3 run clock '["/bin/rc", "-c", "aux/kbdfs -q -s cons /dev/eia0; clock & sleep 4; echo drawn"]'
+want keys $names && KEYS='["e", "c", "h", "o", " ", "ä", "å", "ö", " ", "$", "s", "y", "s", "n", "a", "m", "e", "Enter", "e", "x", "i", "t", "Enter"]' run keys '["/bin/rc", "/boot/console"]'
+want mouse $names && WAITFOR=ready MOUSE='[[0.75, 0.5, 4]]' EXPECTJS="document.getElementById('screen').style.cursor.startsWith('url(')" run mouse '["/bin/c3d"]'
+want hello $names && EXPECT=$h/hello.out run hello '["/bin/rc", "-c", "hello"]'
+want dclock $names && DRAWS=3 run dclock '["/bin/rc", "-c", "dclock 15 & sleep 3; echo drawn"]'
+want bytes $names && EXPECT=$h/bytes.out SENDFILE=$h/bytes.in run bytes '["/bin/bytes"]'
+want rc3 $names && EXPECT=$h/rc.out run rc3 '["/bin/rc", "-c", "echo a b c | wc; ls /bin/rc /bin/echo; for(i in 1 2) echo $i; x=`{echo one two}; echo $#x; cat /rc/lib/rcmain | wc -l"]'
+want rci3 $names && EXPECT=$h/rci.out run rci3 '["/bin/rc", "-i"]' '["echo hello over eia0\n", "echo a b c | wc\n", "ls /bin/rc /bin/echo\n", "x=(1 2 3); echo $#x\n", "exit\n"]'
+want rioclock $names && DRAWS=3 run rioclock '["/bin/rc", "-c", "aux/kbdfs -q -s cons /dev/eia0; rio -i '"'"'window -r 50 50 450 350 clock'"'"' & sleep 10; echo up"]'
+want riorc $names && HALTWAIT=60 KEYS='["e", "c", "h", "o", " ", "ä", "å", "ö", " ", "f", "r", "o", "m", " ", "r", "i", "o", " ", ">", "/", "d", "e", "v", "/", "e", "i", "a", "0", "Enter"]' \
+	run riorc '["/bin/rc", "-c", "aux/kbdfs -q -s cons /dev/eia0; rio -i '"'"'window -r 20 20 580 400 rc'"'"' & sleep 25; echo done"]'
+want boot $names && RUNS=40 DRAWS=10 KEYDELAY=12 MOUSE='[[0.4, 0.4, 1]]' KEYS='["e", "c", "h", "o", " ", "b", "o", "o", "t", "e", "d", " ", ">", "/", "d", "e", "v", "/", "e", "i", "a", "0", "Enter"]' \
+	PAGEARGS='&x=boot' run boot '[]'
+# Ctrl-V as a browser has it (Windows, Chrome): its keydown left to the browser, whose paste event
+# types the text - not ^V typed as a key
+want ctrlv $names && EVAL='setTimeout(() => { const k = new KeyboardEvent("keydown", { key: "v", code: "KeyV", ctrlKey: true, cancelable: true, bubbles: true }); document.dispatchEvent(k); const d = new DataTransfer(); d.setData("text/plain", "invite-abc123\n"); document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: d, cancelable: true, bubbles: true })); }, 4000)' \
+	run ctrlv '["/bin/rc", "-c", "aux/kbdfs -q -s cons /dev/eia0; x=`{read </dev/cons}; echo got $x | xd -c >/dev/eia0; echo done"]'
+# a phone (a touch screen): the key bar under the screen; its keyboard's typing (#kbd's input events),
+# the bar's Ctrl with the next key (^U: kbdfs drops the line typed so far), Return
+want touchbar $names && TOUCH=1 EVAL='setTimeout(() => { const t = document.getElementById("kbd"), type = (i, d) => t.dispatchEvent(new InputEvent("input", { inputType: i, data: d })); document.querySelector("[data-k=kbd]").click(); type("insertText", "abc"); document.querySelector("[data-k=ctrl]").click(); type("insertText", "u"); type("insertText", "hello"); type("insertLineBreak", null); window.barshown = getComputedStyle(document.getElementById("bar")).display; }, 5000)' \
+	run touchbar '["/bin/rc", "-c", "aux/kbdfs -q -s cons /dev/eia0; x=`{read </dev/cons}; echo got $x >/dev/eia0; echo done"]'
+want paste $names && HALTWAIT=150 EVAL='setTimeout(() => { window.kernelpaste(("x".repeat(199) + "\r\n").repeat(100)); setTimeout(() => window.plan9.kbd("c\x04\0"), 40000); }, 4000)' \
+	run paste '["/bin/rc", "-c", "aux/kbdfs -q -s cons /dev/eia0; wc -c </dev/cons >/dev/eia0; echo pasted"]'
+want crypto $names && run crypto '["/bin/d3"]'
+want tls $names && run tls '["/bin/d4"]'
+# /proc/n/args written and read by procs that come and go (devproc's debug lock), and exec's own args again
+want procargs $names && run procargs "[\"/bin/rc\", \"-c\", \"d4 -a; rc -c 'echo -n somehost >/proc/\$pid/args; cat /proc/\$pid/args; echo; exec cat /proc/\$pid/args'; echo; echo done\"]"
+# rfork(RFMEM) procs in rendezvous ended by their group's kill, with and without a handler (exportfs's ending)
+want notekill $names && run notekill '["/bin/rc", "-c", "echo mem nohandler; d4 -k mn; echo fork handler; d4 -k h; echo mem handler; d4 -k; echo done"]'
+# the disk (#S/sdW0, OPFS; /boot/disk: hjfs on it, all of glenda's home): files written, one in a
+# directory the root has too (lib), her profile changed; hjfs synced and the disk flushed; the page
+# loaded again in the same browser (THEN) - the files are there, the root's skeleton too, and her
+# profile is hers (the skeleton fills in, never replaces)
+want disk $names && HALTWAIT=120 THEN='["/bin/rc", "-c", "mntgen -s slashn /n; rc /boot/disk; cat /usr/glenda/persist /usr/glenda/lib/deep; ls /n/disk/usr/glenda/lib; sed -n \u0027$p\u0027 /usr/glenda/lib/profile; sed -n 1p /dev/sdW0/ctl; echo done"]' \
+	run disk '["/bin/rc", "-c", "mntgen -s slashn /n; rc /boot/disk; echo kept over a reload >/usr/glenda/persist; echo deeper >/usr/glenda/lib/deep; echo \u0027# mine\u0027 >>/usr/glenda/lib/profile; echo sync >>/srv/disk.cmd; sleep 2; echo flush >/dev/sdW0/ctl; echo written"]'
+# the disk Worker fails (its flush throws, when the disk is idle after a write): the disk is dead, I/O gives an
+# error and the machine goes on - not a kernel waiting for ever; a page's *sdW0= does not replace the firmware's
+want diskdead $names && run diskdead '["/bin/rc", "-c", "sed -n 2p /dev/sdW0/ctl; echo x >/dev/sdW0/data; echo written; sleep 2; read -c 1 </dev/sdW0/data; echo status $status; sed -n 4p /dev/sdW0/ctl; echo the machine goes on"]' \
+	'[]' '&diskfail=flush&conf=*sdW0%3D0x5000000%20999'
+want fault $names && run fault '["/bin/rc", "-c", "fault x; echo status $status; fault; echo the machine goes on"]'
+# #ω (devwebauthn.c, docs/webauthn.md): the page's passkeys, the browser's virtual authenticator with PRF,
+# the page at localhost (no IP address as rp): a passkey made and got - PRF the same for the same salt,
+# another for another - the user handle without its id, a request cancelled on the page, another
+# domain's refused, a request that is neither
+want webauthn $names && PAGEHOST=localhost WEBAUTHN='["go", "go", "go", "go", "go", "cancel"]' run webauthn '["/bin/d5", "localhost"]'
+# the page's plan9.ini (tools/serve's PLAN9INI) in BootInfo's config, as /boot/secstore takes secstore=; none without
+want pageini $names && PLAN9INI='secstore=tcp!relay!5356' run pageini '["/bin/rc", "-c", "echo secstore $secstore; echo done"]'
+want pageini $names && run pageini0 '["/bin/rc", "-c", "echo secstore $secstore; echo done"]'
+
+# the network: tools/test/authsrv on the port tools/serve's relay goes to (GATEWAY): dp9ik's auth
+# server (/567), secstore (/5356), an rcpu relay inside one machine (/17019 to /17999)
+if want dp9ik $names || want netre $names || want rcpu $names || want rcpuask $names || want nettimeout $names || want sendq $names || want secstore $names || want seckeys $names; then
+	"$here/authsrv" 18099 glenda=gpassword bootes=bpassword secstore:glenda=spassword >"$root/build/test/authsrv.log" 2>&1 &
+	aspid=$!
+	trap 'kill $aspid 2>/dev/null' EXIT
+	export GATEWAY=18099
+	fkeys="mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl"
+	# dp9ik through factotum: glenda and bootes over a pipe, the tickets from the auth server; a wrong
+	# password gives needkey
+	want dp9ik $names && HALTWAIT=120 run dp9ik "$(rcjson "$fkeys; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; d3 -p cirno; echo 'delkey user=glenda' >/mnt/factotum/ctl; echo 'key proto=dp9ik dom=cirno user=glenda !password=wrong' >/mnt/factotum/ctl; d3 -p cirno; echo done")"
+	# a connect whose WebSocket never opens (authsrv's /17998) gives up after 60 s
+	want nettimeout $names && HALTWAIT=150 run nettimeout '["/bin/rc", "-c", "{echo connect relay!17998 >[1=0]} <>/net/tcp/clone; echo status $status; echo done"]'
+	# /net/tcp reconnected: a gen each connect, a reader woken by a hangup (d3 -n)
+	want netre $names && HALTWAIT=300 run netre '["/bin/rc", "-c", "d3 -n 20 4; echo done"]'
+	# rcpu, the machine's own (rcpu, rconnect, tlsclient -a, exportfs) to an rcpu server in the same
+	# machine (d4 -s: tlssrv -a and tcp17019's script) through authsrv's relay: bootes's factotum in its
+	# own namespace, glenda's here - her key given, or asked for on the console (rcpuask: auth_getkey,
+	# /boot/factotum -g).  exportfs says "short write" when the server has gone at the end: left out
+	rsrv="mntgen -s slashmnt /mnt; @{rfork n; auth/factotum -n; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; exec d4 -s tcp!relay!17999} & auth/factotum -n -sfactotum"
+	rcmd="rcpu -h relay -c 'echo remote: service \$service; cat /mnt/term/env/sysname; echo; ls /mnt/term/boot; test -e /mnt/term/dev/draw/new && echo the terminal draws; echo remote done'"
+	want rcpu $names && HALTWAIT=150 run rcpu "$(rcjson "$rsrv; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; sleep 2; $rcmd >[2=1] | sed '/short write in reply/d'; echo rcpu status \$status; echo done")"
+	want rcpuask $names && HALTWAIT=150 run rcpuask "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; $rsrv; sleep 2; {$rcmd >[2=1] | sed '/short write in reply/d'} </dev/cons >/dev/cons >[2=1]; {echo rcpu status \$status; cat /mnt/factotum/ctl; echo done} >/dev/cons")" \
+		'[["user[glenda]: ", "\n"], ["password: ", "gpassword\n"]]'
+	# backpressure: one write of 24 MB (d4 -B; less goes into the host's socket buffers) to a WebSocket that reads nothing (authsrv's /9) - the kernel
+	# reserves each 64 KiB piece in the page before it sends it, so the page holds at most Sendhigh and a
+	# piece and the writer waits
+	want sendq $names && HALTWAIT=60 EXPECTJS='window.plan9.sendqmax > 900000 && window.plan9.sendqmax <= 1114112' \
+		run sendq '["/bin/rc", "-c", "d4 -B tcp!relay!9 24000000 & sleep 8; echo the writer waits; echo done"]'
+	# factotum's keys from secstore: glenda's dp9ik key and a mail password put with secstore -p
+	# (encrypted with her secstore password; authsrv's /5356 keeps them as they came), then /boot/secstore
+	# (/boot/init's) gets them into factotum - a wrong password first, asked again
+	want secstore $names && HALTWAIT=150 run secstore "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; {$fkeys; ramfs -m /mnt/ram; cd /mnt/ram; {echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword'; echo 'key proto=pass service=mail user=glenda !password=mpassword'} >factotum; echo spassword | auth/secstore -i -s tcp!relay!5356 -p factotum >[2=1]; rm factotum; echo before:; cat /mnt/factotum/ctl; secstore=tcp!relay!5356 rc /boot/secstore; echo after:; cat /mnt/factotum/ctl; echo done} </dev/cons >/dev/cons >[2=1]")" \
+		'[["secstore password: ", "wrong\n"], ["secstore password: ", "spassword\n"]]'
+	# the keys' copy on the machine's disk (aux/seckeys, /boot/secstore): from secstore with the disk, the
+	# copy is in glenda's home - aescbc's, not the keys; then without secstore (authsrv refuses /5399:
+	# the dial fails) the keys from the copy, a wrong password first
+	sk="secstore=tcp!relay!5356 rc /boot/secstore; read -c 16 /usr/glenda/lib/factotum.aes; echo 'delkey user=glenda' >/mnt/factotum/ctl; secstore=tcp!relay!5399 rc /boot/secstore; cat /mnt/factotum/ctl"
+	want seckeys $names && HALTWAIT=200 run seckeys "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; {$fkeys; mntgen -s slashn /n; rc /boot/disk; ramfs -m /mnt/ram; cd /mnt/ram; {echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword'; echo 'key proto=pass service=mail user=glenda !password=mpassword'} >factotum; echo spassword | auth/secstore -i -s tcp!relay!5356 -p factotum >[2=1]; rm factotum; $sk; echo done} </dev/cons >/dev/cons >[2=1]")" \
+		'[["secstore password: ", "spassword\n"], ["secstore password: ", "wrong\n"], ["secstore password: ", "spassword\n"]]'
+	kill $aspid; trap - EXIT
+	unset GATEWAY
+fi
+# no auth server (the gateway refuses): no tickets
+want dp9iknoas $names && GATEWAY=18098 HALTWAIT=120 run dp9iknoas "$(rcjson "mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; d3 -p cirno; echo done")"
+[ -z "$failed" ] || { echo "test: failed:$failed"; exit 1; }
+echo "test: ok"

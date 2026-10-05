@@ -2,7 +2,7 @@
 #include <libc.h>
 
 /*
- * C3b (tools/test-9wasm32): an rfork(RFMEM) whose Worker the page does
+ * C3b (tools/test/run): an rfork(RFMEM) whose Worker the page does
  * not make (?failhelper=1: the parent's helper, ?failrfmem=1: the
  * child's) gives -1, and the parent is as it was: it can exec.
  */

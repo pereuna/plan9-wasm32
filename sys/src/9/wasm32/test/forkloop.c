@@ -2,7 +2,7 @@
 #include <libc.h>
 
 /*
- * fork, exit and wait, n times (tools/test-9wasm32): a dead proc's Proc
+ * fork, exit and wait, n times (tools/test/run): a dead proc's Proc
  * and KSTACK go to the next fork only when its Worker has left them.
  * Each child changes its directory; every other one execs this program
  * again, which exits with its argument.

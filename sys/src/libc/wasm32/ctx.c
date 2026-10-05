@@ -1,6 +1,6 @@
 /*
- * wasm32: contexts, the platform's own system calls (monolith
- * wasm32host/host3js.c): a proc's stacks it switches between itself -
+ * wasm32: contexts, the platform's own system calls (the kernel's
+ * trap.c): a proc's stacks it switches between itself -
  * libthread's threads (libthread/wasm32).  Not with libc.h: the system
  * call stubs' way.
  */

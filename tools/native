@@ -30,11 +30,39 @@ X
 chmod 775 "$bin/ar"
 rm -f "$bin/mk" "$bin/rc.mk"
 # mpc (libsec's and libauthsrv's X.mp to C), a program for the host: the
-# release ships some of its output unmade; built here with plan9port from
-# the tree's mpc.y
+# release ships its output for some, not libauthsrv's; built here with
+# plan9port from the tree's mpc.y.  Its numbers are read with strtomp's
+# base 0, which plan9port's libmp does not have (it read 39081 as hex):
+# 9front's rule (0x, 0b, 0 octal, else decimal) in a helper
 if [ -e "$tree/sys/src/cmd/mpc.y" ] && [ ! -x "$bin/mpc" ]; then
 	m=$(mktemp -d)
-	(cd "$m" && cp "$tree/sys/src/cmd/mpc.y" . && PATH=$PLAN9/bin:$PATH "$PLAN9/bin/yacc" -d mpc.y >/dev/null &&
+	cp "$tree/sys/src/cmd/mpc.y" "$m/"
+	sed -i 's/strtomp(f->s->n, nil, 0, nil)/strtomp0(f->s->n)/; 0,/^#include[ \t]*<mp.h>/s//&\nstatic mpint *strtomp0(char*);/' "$m/mpc.y"
+	cat >>"$m/mpc.y" <<'C'
+
+static mpint*
+strtomp0(char *a)
+{
+	int base;
+
+	base = 10;
+	if(a[0] == '0'){
+		if(a[1] == 'x' || a[1] == 'X'){
+			a += 2;
+			base = 16;
+		}else if(a[1] == 'b' || a[1] == 'B'){
+			a += 2;
+			base = 2;
+		}else if(a[1] >= '0' && a[1] <= '7'){
+			a++;
+			base = 8;
+		}
+	}
+	return strtomp(a, nil, base, nil);
+}
+C
+	grep -q 'strtomp0(f->s->n)' "$m/mpc.y" && grep -q '^static mpint \*strtomp0(char\*);' "$m/mpc.y" || { echo "native: mpc.y: its strtomp is not where it was" >&2; exit 1; }
+	(cd "$m" && PATH=$PLAN9/bin:$PATH "$PLAN9/bin/yacc" -d mpc.y >/dev/null &&
 		PATH=$PLAN9/bin:$PATH 9c y.tab.c && PATH=$PLAN9/bin:$PATH 9l -o "$bin/mpc" y.tab.o) || { echo "native: mpc" >&2; exit 1; }
 	rm -rf "$m"
 fi
@@ -59,7 +87,7 @@ fi
 # what the kernel and the boot file system's programs need, in order, and
 # those programs (sys/src/9/wasm32/bootfs.proto)
 libs="libc libthread libmp libsec libbio libregexp libString libauth libauthsrv lib9p libip libndb libdraw libmemdraw libmemlayer libframe libcomplete libplumb libcontrol libflate libdisk"
-one="basename cat cleanname cp date echo ls mkdir mv rm sleep sort touch wc xd bind unmount ns sed mount pwd ps read test chmod tlsclient mntgen ramfs tar stats webcookies"
+one="basename cat cleanname cp date echo ls mkdir mv rm sleep sort touch wc xd bind unmount ns sed mount pwd ps read test chmod tlsclient mntgen ramfs tar stats webcookies clock"
 cmds="cmd/rc cmd/hjfs cmd/rio cmd/aux/kbdfs cmd/auth/factotum cmd/auth/secstore:secstore.install,aescbc.install cmd/aux/seckeys cmd/exportfs cmd/plumb cmd/disk/prep cmd/disk:format.install,mkfs.install,mkext.install cmd/dossrv cmd/gzip:gunzip.install cmd/webfs cmd:$(echo $one | sed 's/\([^ ]*\)/\1.install/g; s/ /,/g')"
 dirs=${*:-$libs 9/wasm32 $cmds}
 # /lib/ucd: libc/ucd's tables are made from it, but they come made (its *data

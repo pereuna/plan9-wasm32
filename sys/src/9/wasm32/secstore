@@ -5,7 +5,7 @@
 # one, none (an empty line) to go on without.  With the machine's disk
 # (/boot/disk) aux/seckeys keeps a copy of the keys in glenda's home,
 # encrypted with the same password (aescbc), and takes them from it when
-# there is no secstore (docs/architecture.md, "Avainten paikka")
+# there is no secstore
 copy=()
 if(test -d /n/disk/usr/glenda/lib)
 	copy=/usr/glenda/lib/factotum.aes

@@ -1,0 +1,21 @@
+# the tests' boot file system: bootfs.proto's and these (tools/test/run;
+# tools/bootfs takes both): the test programs as mk makes them here, and
+# 9front's clock
+bin
+	c3a	- sys sys /sys/src/9/wasm32/test/3.c3a
+	c3b	- sys sys /sys/src/9/wasm32/test/3.c3b
+	c3d	- sys sys /sys/src/9/wasm32/test/3.c3d
+	d2	- sys sys /sys/src/9/wasm32/test/3.d2
+	d3	- sys sys /sys/src/9/wasm32/test/3.d3
+	d4	- sys sys /sys/src/9/wasm32/test/3.d4
+	d5	- sys sys /sys/src/9/wasm32/test/3.d5
+	fault	- sys sys /sys/src/9/wasm32/test/3.fault
+	forkloop	- sys sys /sys/src/9/wasm32/test/3.forkloop
+	hello	- sys sys /sys/src/9/wasm32/test/3.hello
+	fork	- sys sys /sys/src/9/wasm32/test/3.fork
+	dclock	- sys sys /sys/src/9/wasm32/test/3.dclock
+	rfmem	- sys sys /sys/src/9/wasm32/test/3.rfmem
+	threads	- sys sys /sys/src/9/wasm32/test/3.threads
+	bytes	- sys sys /sys/src/9/wasm32/test/3.bytes
+	preempt	- sys sys /sys/src/9/wasm32/test/3.preempt
+	clock	- sys sys /wasm32/bin/clock

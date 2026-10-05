@@ -7,12 +7,12 @@
 #include	"../port/error.h"
 
 /*
- * Plan2001's wasm32 kernel (docs/architecture.md, phase C): 9front's
+ * Plan9-wasm32's kernel: 9front's
  * port/ on the platform's Workers.  main runs on the first: memory,
  * allocation, procs, devices, the clock, then init - a kproc for now
  * (C2a); user processes come with sysproc (C2b).  What the machine is
- * comes from the page as from any firmware: a BootInfo blob (Plan2001
- * Boot ABI v1, docs/boot-abi-wasm32.md), its address main's argument -
+ * comes from the page as from any firmware: a BootInfo blob (BootInfo
+ * v1, docs/boot.md), its address main's argument -
  * the memory map, plan9.ini's text (init=, getconf), the clock, entropy,
  * the framebuffer and the root's archive.
  */
@@ -172,7 +172,7 @@ initproc(void*)
 
 	up->nerrlab = 0;
 	chandevinit();
-	print("Plan2001 wasm32 kernel: 9front's port/\n");
+	print("Plan9-wasm32 kernel: 9front's port/\n");
 
 	if(waserror()){
 		print("initproc: %s\n", up->errstr);
@@ -242,7 +242,7 @@ initproc(void*)
 void
 main(uintptr pa)
 {
-	bootinfopa = pa;	/* the entry ABI: _start's argument (docs/boot-abi-wasm32.md) */
+	bootinfopa = pa;	/* the entry ABI: _start's argument (docs/boot.md) */
 	bootinfoinit();		/* a blob it can not take halts the machine */
 	bootargsinit();
 	m = &mach0;
@@ -261,7 +261,7 @@ main(uintptr pa)
 	screeninit();
 	chandevreset();
 	mouseinput();
-	print("Plan2001 wasm32: %lud pages free\n", conf.npage);
+	print("Plan9-wasm32: %lud pages free\n", conf.npage);
 	/* main's Worker has no up: it is CPU 0, the clock (clock.c); the work is a proc's */
 	{
 		Proc *p;

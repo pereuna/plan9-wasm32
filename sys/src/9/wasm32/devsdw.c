@@ -6,7 +6,7 @@
 #include	"../port/error.h"
 
 /*
- * #S: wasm32's disk (docs/architecture.md, D6), as sd names one:
+ * #S: wasm32's disk (docs/kernel.md), as sd names one:
  * #S/sdW0/{ctl,data}.  The disk is a file in the origin's private file
  * system (OPFS), which only a Worker can use synchronously and only one
  * at a time: the page's disk Worker owns it (platform.js, disk()).  The
@@ -378,7 +378,7 @@ sdwread(Chan *c, void *a, long n, vlong off)
 	case Qctl:
 		p = buf;
 		e = buf+sizeof buf;
-		p = seprint(p, e, "inquiry Plan2001 OPFS disk\ngeometry %llud 512\nrequests %lud errors %lud\nstate %s\n",
+		p = seprint(p, e, "inquiry Plan9-wasm32 OPFS disk\ngeometry %llud 512\nrequests %lud errors %lud\nstate %s\n",
 			disk.size/512, disk.reqs, disk.errs, disk.dead || disk.reg[Rstate] != Diskonline ? "dead" : "online");
 		for(i = 0; i < Npart; i++)
 			if(disk.part[i].valid)

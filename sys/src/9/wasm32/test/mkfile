@@ -1,0 +1,30 @@
+</$objtype/mkfile
+
+# the kernel's test programs (tools/test/run), not installed: the tests'
+# boot file system takes them from here (test.proto), as 3.NAME.  3c's own
+# tests that run on the kernel are in /sys/src/cmd/3c/test.
+TESTS=c3a c3b c3d d2 d3 d4 d5 fault forkloop
+CTESTS=hello fork dclock rfmem threads bytes preempt
+CFLAGS=-FVw
+
+all:V:	${TESTS:%=$O.%} ${CTESTS:%=$O.%}
+
+install:V:	all
+
+$O.%:	%.$O
+	$LD $LDFLAGS -o $target $prereq
+
+%.$O:	%.c
+	$CC $CFLAGS $stem.c
+
+^(hello|fork)\.3$:R:	/sys/src/cmd/3c/test/libc/\1.c
+	$CC $CFLAGS -o $target $prereq
+
+^(dclock)\.3$:R:	/sys/src/cmd/3c/test/draw/\1.c
+	$CC $CFLAGS -o $target $prereq
+
+^(rfmem|threads|bytes|preempt)\.3$:R:	/sys/src/cmd/3c/test/host3/\1.c
+	$CC $CFLAGS -o $target $prereq
+
+clean:V:
+	rm -f *.[$OS] [$OS].*

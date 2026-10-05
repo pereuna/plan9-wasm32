@@ -1,0 +1,483 @@
+#!/usr/bin/env python3
+"""A stand-in for the network the machine reaches through its origin (#I:
+WebSockets, each path a port: tools/serve's relay goes to PORT), for
+tests: a WebSocket server on 127.0.0.1:PORT whose /567 is a dp9ik auth
+server as 9front's auth/authsrv answers one (AuthPAK, then AuthTreq with
+form1 tickets), for the users and passwords given.  Written apart from
+9front's C, from its mpc sources (libauthsrv/*.mp) and authsrv.c: the
+machine's factotum and this agree only if both are right.  And a relay
+for rcpu inside one machine, which cannot listen: /17999 waits, and the
+next /17019 (an rcpu client) is joined to it, bytes both ways
+(sys/src/9/wasm32/test/d4.c's server).  /17998 never answers; /9 takes
+the connection and never reads.  And /5356,
+a secstore server (9front's secstored, written apart from it: pak.c,
+SConn.c), its users' files in memory as the clients put them.  Any other
+path is refused.
+  tools/test/authsrv PORT USER=PASSWORD... [secstore:USER=PASSWORD...]
+"""
+import asyncio, base64, hashlib, hmac, os, struct, sys
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+
+# authsrv.h
+ANAMELEN, DOMLEN, CHALLEN, NONCELEN, AERRLEN = 28, 48, 8, 32, 64
+TICKREQLEN = 3*ANAMELEN + CHALLEN + DOMLEN + 1
+AuthTreq, AuthOK, AuthErr, AuthPAK, AuthTs, AuthTc = 1, 4, 5, 19, 64, 65
+PAKSLEN = (448+7)//8
+PAKYLEN = PAKSLEN
+
+# ed448.mp
+P = 2**448 - 2**224 - 1
+A = 1
+D = -39081 % P
+GX = 117812161263436946737282484343310064665180535357016373416879082147939404277809514858788439644911793978499419995990477371552926308078495
+GY = 19
+
+def inv(x):
+	return pow(x, P-2, P)
+
+# msqrt.mp
+def legendre(a):
+	r = pow(a, (P-1)>>1, P)
+	return -1 if r == P-1 else r
+
+def msqrt(a):
+	a %= P
+	if legendre(a) != 1 or a == 0:
+		return 0
+	return pow(a, (P+1)>>2, P)	# P%4 == 3
+
+def misqrt(a):
+	return pow(a % P, (P-3)>>2, P)	# P%4 == 3
+
+# edwards.mp
+def ed_add(p1, p2):
+	X1, Y1, Z1, T1 = p1
+	X2, Y2, Z2, T2 = p2
+	a_ = X1*X2 % P
+	b = Y1*Y2 % P
+	c = D*T1*T2 % P
+	d = Z1*Z2 % P
+	e = ((X1+Y1)*(X2+Y2) - a_ - b) % P
+	f = (d - c) % P
+	g = (d + c) % P
+	h = (b - A*a_) % P
+	return (e*f % P, g*h % P, f*g % P, e*h % P)
+
+def ed_scale(s, p1):
+	p2 = p1
+	p3 = p1 if s % 2 else (0, 1, 1, 0)
+	k, j = s >> 1, P >> 1
+	while j:
+		p2 = ed_add(p2, p2)
+		p4 = ed_add(p2, p3)
+		if k % 2:
+			p3 = p4
+		k >>= 1
+		j >>= 1
+	return p3
+
+# elligator2.mp
+def elligator2(n, r0):
+	r = n*r0*r0 % P
+	Dd = (D*r + A - D) * (D*r - A*r - D) % P
+	N = (r+1) * (A - 2*D) % P
+	ND = N*Dd % P
+	if ND == 0:
+		c, e = 1, 0
+	else:
+		e = msqrt(ND)
+		if e != 0:
+			c, e = 1, inv(e)
+		else:
+			c = P-1
+			e = n*r0*misqrt(n*ND) % P
+	s = c*N*e % P
+	t = (-c*N*(r-1)*pow((A-2*D)*e, 2, P) - 1) % P
+	return (2*s*t % P, (1-A*s*s)*(1+A*s*s) % P, (1+A*s*s)*t % P, (2*s)*(1-A*s*s) % P)
+
+# decaf.mp
+def decaf_neg(n, r):
+	return (-r) % P if n % P > (P-1)>>1 else r
+
+def decaf_encode(pt):
+	X, Y, Z, T = pt
+	r = misqrt((A-D)*(Z+Y)*(Z-Y))
+	u = (A-D)*r % P
+	r = decaf_neg(-2*u*Z, r)
+	s = u*(r*(A*Z*X - D*Y*T) + Y) * inv(A) % P
+	return decaf_neg(s, s)
+
+def decaf_decode(s):
+	if s > (P-1)>>1:
+		return None
+	ss = s*s % P
+	Z = (1 + A*ss) % P
+	u = (Z*Z - 4*D*ss) % P
+	v = u*ss % P
+	if v != 0:
+		ok = msqrt(v)
+		if ok == 0:
+			return None
+		v = inv(ok)
+	v = decaf_neg(u*v, v)
+	w = v*s*(2-Z) % P
+	if s == 0:
+		w = (w + 1) % P
+	X = 2*s % P
+	return (X, w*Z % P, Z, w*X % P)
+
+# spake2ee.mp
+def h2P(h):
+	n = 2
+	while legendre(n) != -1:
+		n += 1
+	return elligator2(n, h % P)
+
+def hkdf(salt, info, key, n):
+	prk = hmac.new(salt, key, 'sha256').digest()
+	out, t, i = b'', b'', 1
+	while len(out) < n:
+		t = hmac.new(prk, t + info + bytes([i]), 'sha256').digest()
+		out += t
+		i += 1
+	return out[:n]
+
+def be(b):
+	return int.from_bytes(b, 'big')
+
+class Key:
+	"""A user's key as authsrv's keyfs gives it: the AES key from the password, the PAK hash points."""
+	def __init__(self, user, password=None, aes=None):
+		self.aes = aes or hashlib.pbkdf2_hmac('sha1', password.encode(), b'Plan 9 key derivation', 9001, 16)
+		h = hkdf(hashlib.sha256(user.encode()).digest(), b'Plan 9 AuthPAK hash', self.aes, 2*PAKSLEN)
+		self.PM = h2P(be(h[:PAKSLEN]))
+		self.PN = h2P(be(h[PAKSLEN:]))
+		self.pakkey = None
+
+	def paknew(self):
+		"""authpak_new, isclient == 0 (the auth server's side): y = x*G + PN"""
+		self.x = be(os.urandom(64)) % P
+		pt = ed_scale(self.x, (GX, GY, 1, GX*GY % P))
+		self.y = decaf_encode(ed_add(pt, self.PN)).to_bytes(PAKYLEN, 'big')
+		return self.y
+
+	def pakfinish(self, y):
+		"""authpak_finish: z = x*(Yc - PM); the key from z, the client's y and ours"""
+		pt = decaf_decode(be(y))
+		if pt is None:
+			raise ValueError('bad PAK y')
+		X, Y, Z, T = self.PM
+		pt = ed_scale(self.x, ed_add(pt, ((-X) % P, Y, Z, (-T) % P)))
+		z = decaf_encode(pt).to_bytes(PAKSLEN, 'big')
+		salt = hashlib.sha256(y + self.y).digest()
+		self.pakkey = hkdf(salt, b'Plan 9 AuthPAK key', z, 32)
+
+counter = 0
+
+def form1(num, body, key):
+	"""convT2M with t.form == 1: sig[8] | counter[4] | ccpoly(body) | tag[16]"""
+	global counter
+	sig = {AuthTs: b'form1 Ts', AuthTc: b'form1 Tc'}[num]
+	nonce = sig + struct.pack('<I', counter)
+	counter += 1
+	return nonce + ChaCha20Poly1305(key).encrypt(nonce, body, None)
+
+def cstr(b):
+	return b.split(b'\0', 1)[0].decode()
+
+class Authsrv:
+	def __init__(self, users):
+		self.users = users
+		self.slots = {}
+
+	def key(self, u):
+		# a user it does not know gets a made-up key, as authsrv's mkkey
+		return Key(u, self.users[u] if u in self.users else os.urandom(16).hex())
+
+	async def run(self, read, write):
+		while True:
+			tr = await read(TICKREQLEN)
+			typ = tr[0]
+			authid = cstr(tr[1:1+ANAMELEN])
+			chal = tr[1+ANAMELEN+DOMLEN:1+ANAMELEN+DOMLEN+CHALLEN]
+			hostid = cstr(tr[1+ANAMELEN+DOMLEN+CHALLEN:1+2*ANAMELEN+DOMLEN+CHALLEN])
+			uid = cstr(tr[1+2*ANAMELEN+DOMLEN+CHALLEN:])
+			if typ == AuthPAK:
+				# authsrv's slots: akey (authid) and hkey (hostid) apart, even for one user
+				write(bytes([AuthOK]))
+				self.slots = {}
+				ids = ([('a', authid)] if hostid and authid else []) + ([('h', hostid)] if hostid else [('u', uid)] if uid else [])
+				for slot, u in ids:
+					k = self.key(u)
+					write(k.paknew())
+					k.pakfinish(await read(PAKYLEN))
+					self.slots[slot] = (u, k)
+			elif typ == AuthTreq:
+				a, h = self.slots.get('a'), self.slots.get('h')
+				if not uid or a is None or h is None or a[0] != authid or h[0] != hostid or hostid != uid:
+					err = b'DES is disabled' if a is None or h is None or a[0] != authid or h[0] != hostid else b'no speaks for'
+					write(bytes([AuthErr]) + err.ljust(AERRLEN, b'\0'))
+					return
+				name = lambda s: s.encode().ljust(ANAMELEN, b'\0')
+				body = chal + name(uid) + name(uid) + os.urandom(NONCELEN)
+				write(bytes([AuthOK]) + form1(AuthTc, body, h[1].pakkey)
+					+ form1(AuthTs, body, a[1].pakkey))
+				print(f'test-authsrv: tr-ok {uid}@{hostid} -> {uid}@{authid}', flush=True)
+				self.slots = {}
+			else:
+				return
+
+# secstore (9front's auth/secstore: pak.c, SConn.c, secstored.c): PAK, then
+# records of 2 bytes count (0x80|n) and, once the secret is set, a SHA1 MAC
+# and RC4; GET, PUT, RM, BYE on the user's files, kept as the client sent
+# them (encrypted with its password: this server cannot read them)
+SSQ = int('E0F0EF284E10796C5A2A511E94748BA03C795C13', 16)
+SSP = int('C41CFBE4D4846F67A3DF7DE9921A49D3B42DC33728427AB159CEC8CBB'
+	'DB12B5F0C244F1A734AEB9840804EA3C25036AD1B61AFF3ABBC247CD4B384224567A86'
+	'3A6F020E7EE9795554BCD08ABAD7321AF27E1E92E3DB1C6E7E94FAAE590AE9C48F96D9'
+	'3D178E809401ABE8A534A1EC44359733475A36A70C7B425125062B1142D', 16)
+SSR = int('DF310F4E54A5FEC5D86D3E14863921E834113E060F90052AD332B3241'
+	'CEF2497EFA0303D6344F7C819691A0F9C4A773815AF8EAECFB7EC1D98F039F17A32A7E'
+	'887D97251A927D093F44A55577F4D70444AEBD06B9B45695EC23962B175F266895C67D'
+	'21C4656848614D888A4', 16)
+SSG = int('2F1C308DC46B9A44B52DF7DACCE1208CCEF72F69C743ADD4D23271734'
+	'44ED6E65E074694246E07F9FD4AE26E0FDDD9F54F813C40CB9BCD4338EA6F242AB94CD'
+	'410E676C290368A16B1A3594877437E516C53A6EEE5493A038A017E955E218E7819734'
+	'E3E2A6E0BAE08B14258F8C03CC1B30E0DDADFCF7CEDF0727684D3D255F1', 16)
+SSMAXMSG = 4096
+
+def mp64(x):
+	"""mptoa(x, 64): enc64 of its big-endian bytes"""
+	return base64.b64encode(x.to_bytes((x.bit_length()+7)//8 or 1, 'big')).decode()
+
+def ss_Hi(C, password):
+	"""pak.c's PAK_Hi: H = (hmac_sha1s of ver,C,sha1(password))^r mod p, its inverse"""
+	cp = b'secstore' + C.encode() + hashlib.sha1(password.encode()).digest()
+	buf = b''.join(hmac.new(bytes([ord('A')+i]), cp, hashlib.sha1).digest() for i in range(7))
+	H = pow(int.from_bytes(buf, 'big') % SSP, SSR, SSP)
+	return pow(H, -1, SSP)
+
+def ss_short(mess, *a):
+	"""pak.c's shorthash: sha1 of mess, C, S, m, mu, sigma, Hi, twice"""
+	h = hashlib.sha1()
+	for _ in range(2):
+		for x in (mess,) + a:
+			h.update(x.encode())
+	return h.digest()
+
+class RC4:
+	def __init__(self, key):
+		S = list(range(256))
+		j = 0
+		for i in range(256):
+			j = (j + S[i] + key[i % len(key)]) & 255
+			S[i], S[j] = S[j], S[i]
+		self.S, self.i, self.j = S, 0, 0
+	def crypt(self, data):
+		S, i, j, out = self.S, self.i, self.j, bytearray()
+		for c in data:
+			i = (i + 1) & 255
+			j = (j + S[i]) & 255
+			S[i], S[j] = S[j], S[i]
+			out.append(c ^ S[(S[i] + S[j]) & 255])
+		self.i, self.j = i, j
+		return bytes(out)
+
+class Secstore:
+	def __init__(self, users):
+		self.users = users	# user: secstore password
+		self.files = {}		# (user, name): bytes as the client put them
+
+	async def run(self, read, write):
+		st = {'alg': False, 'inseq': 0, 'outseq': 0}
+		def mac(secret, data, seq):
+			return hashlib.sha1(secret + data + seq.to_bytes(4, 'big')).digest()
+		def put(data):
+			n = len(data) + (20 if st['alg'] else 0)
+			hdr = bytes([0x80 | n >> 8, n & 255])
+			if st['alg']:
+				d = mac(st['outsec'], data, st['outseq'])
+				write(hdr + st['outrc4'].crypt(d) + st['outrc4'].crypt(data))
+			else:
+				write(hdr + data)
+			st['outseq'] += 1
+		async def get():
+			c = await read(2)
+			if not c[0] & 0x80:
+				raise EOFError
+			n = (c[0] & 0x7f) << 8 | c[1]
+			if st['alg']:
+				d = st['inrc4'].crypt(await read(20))
+				data = st['inrc4'].crypt(await read(n - 20))
+				if not hmac.compare_digest(d, mac(st['insec'], data, st['inseq'])):
+					raise EOFError
+			else:
+				data = await read(n)
+			st['inseq'] += 1
+			return data
+		def err(m):
+			put(b'!' + m.encode())
+		m1 = (await get()).decode()
+		if not m1.startswith('secstore\tPAK\nC='):
+			return err('protocol should start with ver alg')
+		f = m1.split('\n')
+		C, hexm = f[1][2:], f[2][2:]
+		if C not in self.users:
+			return err('no account')
+		m = int.from_bytes(base64.b64decode(hexm), 'big') % SSP
+		Hi = ss_Hi(C, self.users[C])
+		y = int.from_bytes(os.urandom(30), 'big') % SSQ or 1
+		mu = pow(SSG, y, SSP)
+		sigma = pow(m * Hi % SSP, y, SSP)
+		S = 'relay'
+		a = (C, S, hexm, mp64(mu), mp64(sigma), mp64(Hi))
+		ks = base64.b64encode(ss_short('server', *a)).decode()
+		put(f'mu={a[3]}\nk={ks}\nS={S}\n'.encode())
+		kc = (await get()).decode()
+		if kc != "k'=" + base64.b64encode(ss_short('client', *a)).decode() + '\n':
+			print(f'test-authsrv: secstore {C}: wrong password', flush=True)
+			return
+		sk = ss_short('session', *a)
+		st['outsec'] = hmac.new(b'one', sk, hashlib.sha1).digest()
+		st['insec'] = hmac.new(b'two', sk, hashlib.sha1).digest()
+		st['outrc4'], st['inrc4'] = RC4(st['outsec'][:16]), RC4(st['insec'][:16])
+		st['alg'] = True
+		put(b'OK')
+		while True:
+			msg = (await get()).decode()
+			if msg.startswith('GET '):
+				b = self.files.get((C, msg[4:]))
+				if b is None:
+					put(b'-1')
+					continue
+				put(str(len(b)).encode())
+				for i in range(0, len(b), SSMAXMSG):
+					put(b[i:i+SSMAXMSG])
+				print(f'test-authsrv: secstore {C}: GET {msg[4:]}', flush=True)
+			elif msg.startswith('PUT '):
+				n, b = int((await get()).decode()), b''
+				while len(b) < n:
+					b += await get()
+				self.files[(C, msg[4:])] = b
+				print(f'test-authsrv: secstore {C}: PUT {msg[4:]}', flush=True)
+			elif msg.startswith('RM '):
+				self.files.pop((C, msg[3:]), None)
+			elif msg.startswith('BYE'):
+				return
+			else:
+				return err('unrecognized operation')
+
+async def ws(r, w, users):
+	"""A WebSocket server (RFC 6455), binary frames: /567 the auth server"""
+	try:
+		head = await r.readuntil(b'\r\n\r\n')
+	except (asyncio.IncompleteReadError, ConnectionError):
+		w.close()
+		return
+	lines = head.decode('latin1').split('\r\n')
+	path = lines[0].split()[1]
+	hdr = {l.split(':', 1)[0].strip().lower(): l.split(':', 1)[1].strip() for l in lines[1:] if ':' in l}
+	print(f'test-authsrv: {path}', flush=True)
+	if path == '/17998':	# never answers: a connect that must give up (devwsnet's 60 s)
+		await asyncio.sleep(3600)
+		w.close()
+		return
+	if path not in ('/567', '/5356', '/17019', '/17999', '/9'):
+		w.write(b'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n')
+		w.close()
+		return
+	acc = base64.b64encode(hashlib.sha1((hdr['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+	w.write(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+		f'Sec-WebSocket-Accept: {acc}\r\n\r\n').encode())
+	buf = bytearray()
+	async def frame():
+		b0, b1 = await r.readexactly(2)
+		n = b1 & 0x7f
+		if n == 126:
+			n = struct.unpack('>H', await r.readexactly(2))[0]
+		elif n == 127:
+			n = struct.unpack('>Q', await r.readexactly(8))[0]
+		mask = await r.readexactly(4) if b1 & 0x80 else b'\0'*4
+		data = bytes(c ^ mask[i % 4] for i, c in enumerate(await r.readexactly(n)))
+		return b0 & 0x0f, data
+	async def read(n):
+		while len(buf) < n:
+			op, data = await frame()
+			if op == 8:
+				raise EOFError
+			if op in (0, 1, 2):
+				buf.extend(data)
+		out = bytes(buf[:n])
+		del buf[:n]
+		return out
+	def write(data, op=0x82):
+		n = len(data)
+		h = bytes([op, n]) if n < 126 else bytes([op, 126]) + struct.pack('>H', n) if n < 65536 else bytes([op, 127]) + struct.pack('>Q', n)
+		w.write(h + data)
+	if path == '/9':	# a sink that never reads: the machine's writer must wait (devwsnet's Sendhigh)
+		await asyncio.sleep(3600)
+		w.close()
+		return
+	if path == '/17999':	# an rcpu server waits for a client
+		done = asyncio.Event()
+		await listeners.put((frame, write, w, done))
+		await done.wait()
+		w.close()
+		return
+	if path == '/17019':	# an rcpu client: joined to the server waiting
+		try:
+			pframe, pwrite, pw, pdone = await asyncio.wait_for(listeners.get(), 30)
+		except asyncio.TimeoutError:
+			w.close()
+			return
+		async def pump(src, dst, dw):
+			try:
+				while True:
+					op, data = await src()
+					if op == 8:
+						return
+					if op in (0, 1, 2) and data:
+						dst(data)
+						await dw.drain()
+			except (asyncio.IncompleteReadError, ConnectionError):
+				return
+		ts = [asyncio.create_task(pump(frame, pwrite, pw)), asyncio.create_task(pump(pframe, write, w))]
+		await asyncio.wait(ts, return_when=asyncio.FIRST_COMPLETED)
+		for t in ts:
+			t.cancel()
+		for x in (w, pw):
+			try:
+				x.write(b'\x88\x00')
+			except ConnectionError:
+				pass
+		pdone.set()
+		w.close()
+		return
+	try:
+		if path == '/5356':
+			await secstore.run(read, write)
+		else:
+			await Authsrv(users).run(read, write)
+	except (EOFError, asyncio.IncompleteReadError, ConnectionError, ValueError) as e:
+		if isinstance(e, ValueError):
+			print(f'test-authsrv: {e}', flush=True)
+	try:
+		w.write(b'\x88\x00')
+		await w.drain()
+	except ConnectionError:
+		pass
+	w.close()
+
+async def main():
+	global listeners
+	listeners = asyncio.Queue()
+	port = int(sys.argv[1])
+	global secstore
+	users = dict(a.split('=', 1) for a in sys.argv[2:] if not a.startswith('secstore:'))
+	secstore = Secstore(dict(a[9:].split('=', 1) for a in sys.argv[2:] if a.startswith('secstore:')))
+	srv = await asyncio.start_server(lambda r, w: ws(r, w, users), '127.0.0.1', port)
+	async with srv:
+		await srv.serve_forever()
+
+if __name__ == '__main__':
+	asyncio.run(main())

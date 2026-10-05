@@ -1,5 +1,5 @@
 /*
- * wasm32: the machine's types for port/ (docs/architecture.md, phase C).
+ * wasm32: the machine's types for port/ (docs/kernel.md).
  * A CPU is a Worker, a Proc runs on one of its own; no MMU, no FPU state
  * to save (WebAssembly keeps it), no interrupts (the platform's events are
  * kprocs' wakeups).

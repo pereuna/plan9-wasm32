@@ -8,7 +8,7 @@
 #endif
 
 /*
- * 3l: .3 objects and libraries to a WebAssembly module (Plan2001,
+ * 3l: .3 objects and libraries to a WebAssembly module (Plan9-wasm32,
  * objtype wasm32).  The module is a process: its own memory, every
  * function of type () -> () (arguments in memory at SP, results in the
  * RET globals), and one import, plan9.syscall(number, args) -> i64.

@@ -1,4 +1,4 @@
-/* the tests under gcc: main calls _main, for tools/test-3c's comparison */
+/* the tests under gcc: main calls _main, for a comparison with gcc's */
 #include <stdarg.h>
 #include <unistd.h>
 #include <stdlib.h>

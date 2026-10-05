@@ -1,21 +1,21 @@
-// Plan2001's wasm32 machine: the platform, its firmware (docs/architecture.md,
-// phase C).  The kernel (9wasm32.wasm, 3c and 3l -k) imports its memory -
-// shared, one for all its Workers - and the functions of platform.h, which
-// it calls as any C function: their arguments are in memory at SP, results
-// go back in RET (wasm32's calling convention).  Each Worker is a CPU: the
-// first runs main, each platnewproc another (a kproc).  The page (kernel.html)
-// is the machine's front: it makes the Workers and is #t/eia0's other end.
-// As the machine's firmware, boot() hands the kernel what it is as any
-// loader does: a BootInfo blob (Plan2001 Boot ABI v1, plan9/sys/include/
-// bootinfo.h; docs/boot-abi-wasm32.md), its address _start's argument.
+// Plan9-wasm32's machine: the platform, its firmware (docs/kernel.md).
+// The kernel (9wasm32.wasm, 3c and 3l -k) imports its memory - shared,
+// one for all its Workers - and the functions of platform.h, which it
+// calls as any C function: their arguments are in memory at SP, results
+// go back in RET (wasm32's calling convention).  Each Worker is a CPU:
+// the first runs main, each platnewproc another (a kproc).  The page
+// (kernel.html) is the machine's front: it makes the Workers and is
+// #t/eia0's other end.  As the machine's firmware, boot() hands the kernel
+// what it is as any loader does: a BootInfo blob (BootInfo v1,
+// sys/include/bootinfo.h; docs/boot.md), its address _start's argument.
 //
 //   import { boot } from './platform.js'; boot('9wasm32.wasm', { eia(bytes), halt(why) })
-// For tests, window.monolith: eia0bytes, eia0out, eia0b64, eia0in.
+// For tests, window.plan9: eia0bytes, eia0out, eia0b64, eia0in.
 
 const PAGES = 1024, MAXPAGES = 16384;	// 64 MB, the kernel's (its image, its heap); 3l -k's maximum
 
 /*
- * The BootInfo blob (bootinfo.h; docs/boot-abi.md): the same data as the
+ * The BootInfo blob (bootinfo.h; docs/boot.md): the same data as the
  * UEFI loader's for amd64 and arm64.  3c lays the structs out as 6c does
  * (u64int 8-aligned, the size a multiple of 8): BootInfo 224 bytes,
  * BootMem 24.  The page puts, above the kernel's 64 MB, the blob, the
@@ -651,7 +651,7 @@ function cpu({ module, mem, role, fn, arg, sp, user }) {
 		env.x = inst.exports;
 		if (role === 'boot') {
 			env.x._init();		// the kernel's data, once
-			/* the entry ABI (docs/boot-abi-wasm32.md): _start(BootInfo's address), as a C call - at SP */
+			/* the entry ABI (docs/boot.md): _start(BootInfo's address), as a C call - at SP */
 			const top = (env.x.stacktop.value - 16) & ~7;
 			new DataView(mem.buffer).setUint32(top, arg, true);
 			env.x.sp.value = top;
@@ -687,7 +687,8 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
  * origin's private file system (OPFS), the same file each time the page
  * is loaded - what the machine wrote is there after a reload.  Only a
  * Worker can use it synchronously (a sync access handle), and only one
- * at a time: another tab of the same origin gets no disk.  First the
+ * at a time: another tab of the same origin gets no disk (after 3 s: a
+ * page loaded again waits for the last one's to let go).  First the
  * file, at least size bytes ({ diskready: its size } or { diskfail });
  * then { mem, regs }: the kernel's requests, one at a time, in the
  * registers, into and out of its memory.  Writes go to the file (flush)
@@ -696,8 +697,17 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
 async function disk({ name, size, fail }) {
 	let h;
 	try {
-		const dir = await navigator.storage.getDirectory();
-		h = await (await dir.getFileHandle(name, { create: true })).createSyncAccessHandle();
+		const dir = await navigator.storage.getDirectory(), fh = await dir.getFileHandle(name, { create: true });
+		/* a page loaded again: the last one's disk Worker may hold the file a moment longer */
+		for (let i = 0; ; i++) {
+			try {
+				h = await fh.createSyncAccessHandle();
+				break;
+			} catch (e) {
+				if (e.name !== 'NoModificationAllowedError' || i >= 30) throw e;
+				await new Promise((r) => setTimeout(r, 100));
+			}
+		}
 		if (h.getSize() < size)
 			h.truncate(size);
 		if (fail === 'flush')	/* a test's: the file fails when it is flushed */
@@ -787,8 +797,8 @@ function diskloop(h, mem, regs) {
  * file read as it is (a File: no lock, before the disk Worker takes it),
  * its GPT's EFI system partition (9front's useesp: 9fat), FAT12/16/32 with
  * VFAT's long names, and on it the kernel (bootfile= in plan9.ini, default
- * 9wasm32.wasm), its boot root (root.fs) and plan9.ini - Plan2001's
- * /boot/install puts them there.  null: no such disk, the network's then.
+ * 9wasm32.wasm), its boot root (root.fs) and plan9.ini - the installer
+ * puts them there.  null: no such disk, the network's then.
  */
 export async function diskboot(name = 'sdW0') {
 	const no = (why) => { console.log('KLOG platform: no disk boot: ' + why); return null; };
@@ -1088,7 +1098,7 @@ export async function boot(url, front = {}) {
 			const challenge = q.challenge ? dec(q.challenge) : crypto.getRandomValues(new Uint8Array(32));
 			if (r.kind === 'create') {
 				const c = await navigator.credentials.create({ publicKey: {
-					rp: { id: q.rp, name: 'Plan2001' },
+					rp: { id: q.rp, name: 'Plan9-wasm32' },
 					user: { id: dec(q.user), name: q.name, displayName: q.name },
 					challenge, pubKeyCredParams: [{ type: 'public-key', alg: -7 }],	/* ES256: libsec's P-256 */
 					authenticatorSelection: { residentKey: 'required', userVerification: 'preferred', ...(away ? { authenticatorAttachment: 'cross-platform' } : {}) },
@@ -1134,34 +1144,17 @@ export async function boot(url, front = {}) {
 			},
 		};
 	})();
-	const net = { ws: new Map() };	/* n -> its conversation: { gen, ws, opened, session } */
+	const net = { ws: new Map() };	/* n -> its conversation: { gen, ws, opened } */
 	const NRING = 64*1024;		/* a power of 2: the counters run on modulo 2^32, the index masked */
 	/*
-	 * webterm's rcpu session (path /rcpu: an app's origin, docs/app-origins.md)
-	 * outlives its WebSocket - a phone's browser drops connections in the
-	 * background.  Text frames are its control: s TOKEN (first: the
-	 * session), r N (on each attach: it has N bytes from the page), a N
-	 * (both ways: N bytes received), e (it has ended), x (the page's: end
-	 * it).  The page acknowledges every ACKEVERY bytes, keeps what it sent
-	 * until the session acknowledges it, and when the WebSocket drops
-	 * without e it attaches again (/resume/TOKEN/RCVD) for up to KEEP, then
-	 * sends again what the session does not have.  The kernel sees one
-	 * connection.
-	 */
-	const ACKEVERY = 16*1024, KEEP = 10*60*1000;
-	/*
 	 * What comes faster than the kernel reads waits in the conversation's
-	 * queue and goes into its ring as the kernel makes room - a resumed
-	 * session sends its whole backlog at once, up to webterm's 8 MB.  A
-	 * session acknowledges only what is in the ring, so webterm's
-	 * high-water mark bounds the queue too: past QMAX the other end is not
-	 * keeping to it and the connection fails (QMAXRAW for a plain one).
-	 * The other way the kernel reserves: it adds a piece to sendq in the
-	 * ring before it sends it and waits past Sendhigh (devwsnet.c); the page
-	 * takes off what it no longer holds - acknowledged by the session, or
-	 * gone from a plain WebSocket's bufferedAmount.
+	 * queue and goes into its ring as the kernel makes room; past QMAX the
+	 * other end is not keeping to any flow control and the connection
+	 * fails.  The other way the kernel reserves: it adds a piece to sendq
+	 * in the ring before it sends it and waits past Sendhigh (devwsnet.c);
+	 * the page takes off what has left the WebSocket's bufferedAmount.
 	 */
-	const QMAX = 9*1024*1024, QMAXRAW = 1024*1024;
+	const QMAX = 1024*1024;
 	net.open = ({ id, gen, path, ring, st }) => {
 		net.close({ id });	/* an older gen's, if its close has not come yet */
 		const i32 = new Int32Array(mem.buffer);
@@ -1172,8 +1165,7 @@ export async function boot(url, front = {}) {
 		Atomics.store(i32, (ring + 4) >> 2, (front.ringstart ?? 0) | 0);
 		Atomics.store(i32, (ring + 8) >> 2, 0);
 		Atomics.store(i32, (ring + 12) >> 2, 0);
-		const s = path === '/rcpu' ? { token: null, rcvd: 0, delivered: 0, acked: 0, sent: [], sentlen: 0, base: 0, ready: false, since: 0 } : null;
-		const c = { gen, ws: null, opened: false, session: s, q: [], qlen: 0, pump: 0 };
+		const c = { gen, ws: null, opened: false, q: [], qlen: 0, pump: 0 };
 		c.ring = ring;
 		net.ws.set(id, c);
 		const mine = () => net.ws.get(id) === c;
@@ -1201,79 +1193,37 @@ export async function boot(url, front = {}) {
 				c.qlen -= n;
 				Atomics.store(i32, (ring + 4) >> 2, w | 0);
 				Atomics.notify(i32, (ring + 4) >> 2);
-				if (s) {
-					s.delivered += n;
-					if (s.delivered - s.acked >= ACKEVERY && c.ws?.readyState === 1) { s.acked = s.delivered; c.ws.send('a ' + s.acked); }
-				}
 			}
 			if (c.q.length) c.pump = setTimeout(deliver, 5);
 		};
 		const put = (b) => {
-			if (c.qlen + b.length > (s ? QMAX : QMAXRAW)) {
+			if (c.qlen + b.length > QMAX) {
 				end(3);
 				c.ws?.close();
-				return false;
+				return;
 			}
 			c.q.push(b);
 			c.qlen += b.length;
 			if (!c.pump) deliver();
-			return true;
 		};
-		/* the session has the page's bytes up to n: what it sent before that is not kept */
-		const trim = (n) => {
-			const was = s.sentlen;
-			while (s.sent.length && s.base + s.sent[0].length <= n) { s.sentlen -= s.sent[0].length; s.base += s.sent.shift().length; }
-			if (s.sent.length && n > s.base) { s.sentlen -= n - s.base; s.sent[0] = s.sent[0].subarray(n - s.base); s.base = n; }
-			net.release(c, was - s.sentlen);
+		let ws;
+		try {
+			ws = new WebSocket((front.ws ?? '') + path);
+		} catch (e) {
+			end(2);
+			return;
+		}
+		ws.binaryType = 'arraybuffer';
+		c.ws = ws;
+		ws.onopen = () => {
+			if (!mine()) return;
+			if (!c.opened) { c.opened = true; word(st, 1); }
 		};
-		const control = (ws, t) => {
-			if (t.startsWith('s ')) s.token = t.slice(2);
-			else if (t.startsWith('a ')) trim(Number(t.slice(2)));
-			else if (t.startsWith('r ')) {
-				trim(Number(t.slice(2)));
-				for (const b of s.sent) ws.send(b);
-				s.ready = true;
-				s.since = 0;
-			} else if (t === 'e') {
-				s.ended = true;
-				end(1);
-				ws.close();
-			}
+		ws.onclose = ws.onerror = () => end(1);
+		ws.onmessage = (e) => {
+			if (!mine()) return;
+			put(typeof e.data === 'string' ? new TextEncoder().encode(e.data) : new Uint8Array(e.data));
 		};
-		const connect = (p) => {
-			let ws;
-			try {
-				ws = new WebSocket((front.ws ?? '') + p);
-			} catch (e) {
-				end(2);
-				return;
-			}
-			ws.binaryType = 'arraybuffer';
-			c.ws = ws;
-			const live = () => mine() && c.ws === ws;
-			ws.onopen = () => {
-				if (!live()) return;
-				if (!c.opened) { c.opened = true; word(st, 1); }
-			};
-			ws.onclose = ws.onerror = () => {
-				if (!live()) return;
-				if (!s || s.ended || !s.token) { end(1); return; }
-				/* the session goes on: attach again, from what has come */
-				s.ready = false;
-				if (!s.since) s.since = Date.now();
-				if (Date.now() - s.since > KEEP) { end(1); return; }
-				c.ws = null;
-				setTimeout(() => { if (mine() && c.ws === null) connect('/resume/' + s.token + '/' + s.rcvd); }, 1000);
-			};
-			ws.onmessage = (e) => {
-				if (!live()) return;
-				if (s && typeof e.data === 'string') { control(ws, e.data); return; }
-				const b = typeof e.data === 'string' ? new TextEncoder().encode(e.data) : new Uint8Array(e.data);
-				if (!put(b) || !s) return;
-				s.rcvd += b.length;	/* had: a resume starts after it; acknowledged once in the ring (deliver) */
-			};
-		};
-		connect(path);
 	};
 	/* k bytes of the kernel's the page no longer holds for c: off its reservation (never below 0), its writer woken */
 	net.release = (c, k) => {
@@ -1286,7 +1236,7 @@ export async function boot(url, front = {}) {
 	};
 	/* a test's: the most the kernel has had reserved in the page, as the page sees it */
 	const seen = (c) => { net.sendqmax = Math.max(net.sendqmax ?? 0, Atomics.load(new Int32Array(mem.buffer), (c.ring + 12) >> 2)); };
-	/* a plain connection: what has left the WebSocket's buffer is let go, looked at again until all has */
+	/* what has left the WebSocket's buffer is let go, looked at again until all has */
 	const rawq = (c) => {
 		c.rawt = 0;
 		if (net.ws.get(c.id) !== c) return;
@@ -1299,11 +1249,7 @@ export async function boot(url, front = {}) {
 		const c = net.ws.get(id);
 		if (!c || c.gen !== gen) return;
 		seen(c);
-		if (c.session) {
-			c.session.sent.push(b);	/* until the session acknowledges it (trim lets it go) */
-			c.session.sentlen += b.length;
-			if (c.session.ready && c.ws?.readyState === 1) c.ws.send(b);
-		} else if (c.ws?.readyState === 1) {
+		if (c.ws?.readyState === 1) {
 			c.ws.send(b);
 			c.id = id;
 			c.posted = (c.posted ?? 0) + b.length;
@@ -1318,7 +1264,6 @@ export async function boot(url, front = {}) {
 		net.ws.delete(id);
 		if (!c.ws) return;
 		c.ws.onopen = c.ws.onclose = c.ws.onerror = c.ws.onmessage = null;
-		if (c.session && c.ws.readyState === 1) c.ws.send('x');	/* the kernel hung up: the session ends */
 		c.ws.close();
 	};
 
@@ -1355,12 +1300,12 @@ export async function boot(url, front = {}) {
 		w.onerror = (e) => { if (!failed(job, e.message)) console.log('KERNEL-HALT platform: worker: ' + e.message); };
 		w.postMessage(job, job.user ? [job.user.snap.buffer] : []);
 	};
-	window.monolith = {
+	window.plan9 = {
 		get flushes() { return screen.flushes; },
 		get sendqmax() { return net.sendqmax ?? 0; },
 		eia0bytes: () => { const b = new Uint8Array(eia.reduce((n, c) => n + c.length, 0)); let o = 0; for (const c of eia) { b.set(c, o); o += c.length; } return b; },
-		eia0out: () => new TextDecoder().decode(window.monolith.eia0bytes()),
-		eia0b64: () => { let s = ''; for (const c of window.monolith.eia0bytes()) s += String.fromCharCode(c); return btoa(s); },
+		eia0out: () => new TextDecoder().decode(window.plan9.eia0bytes()),
+		eia0b64: () => { let s = ''; for (const c of window.plan9.eia0bytes()) s += String.fromCharCode(c); return btoa(s); },
 		eia0in: (x) => {
 			if (!ring) return -1;
 			const b = typeof x === 'string' ? new TextEncoder().encode(x) : new Uint8Array(x);
@@ -1387,7 +1332,7 @@ export async function boot(url, front = {}) {
 			kbdpump();
 			return 1;
 		},
-		eia0inb64: (b) => window.monolith.eia0in(Uint8Array.from(atob(b), (c) => c.charCodeAt(0))),
+		eia0inb64: (b) => window.plan9.eia0in(Uint8Array.from(atob(b), (c) => c.charCodeAt(0))),
 	};
 	if (fb) screen.fb(fb);
 	spawn({ module, mem, role: 'boot', arg: pa });

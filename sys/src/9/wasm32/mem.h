@@ -1,5 +1,5 @@
 /*
- * wasm32 (docs/architecture.md, phase C): no MMU, no paging; the kernel's
+ * wasm32 (docs/kernel.md): no MMU, no paging; the kernel's
  * memory is the platform's shared memory, its addresses physical, from 0
  */
 #define KiB		1024u

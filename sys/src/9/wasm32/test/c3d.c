@@ -2,7 +2,7 @@
 #include <libc.h>
 
 /*
- * C3d (tools/test-9wasm32): the page's mouse and cursor - a cursor of
+ * C3d (tools/test/run): the page's mouse and cursor - a cursor of
  * its own into /dev/cursor (the page's canvas shows it), then a click on
  * the screen read from /dev/mouse: its button and which half it was in.
  */

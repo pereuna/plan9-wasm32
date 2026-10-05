@@ -3,7 +3,7 @@
 
 /*
  * 3c/wasm32
- * WebAssembly, 32-bit addresses (Plan2001)
+ * WebAssembly, 32-bit addresses (Plan9-wasm32)
  */
 #define	SZ_CHAR		1
 #define	SZ_SHORT	2

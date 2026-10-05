@@ -5,8 +5,8 @@
 #include "fns.h"
 
 /*
- * The loader passes what it learned in a BootInfo blob (Plan2001 Boot ABI
- * v1, sys/include/bootinfo.h, docs/boot-abi.md) and tells us where: each
+ * The loader passes what it learned in a BootInfo blob (BootInfo
+ * v1, sys/include/bootinfo.h, docs/boot.md) and tells us where: each
  * ISA's entry code saves the address it was handed (AMD64: RDI, see
  * pc64/l.s) in bootinfopa.  There is no fixed address to look at.  This
  * file is the same for every ISA; what differs - mapping the blob before

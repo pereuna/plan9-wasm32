@@ -1,0 +1,61 @@
+# The kernel: 9front's port/ on a browser
+
+`sys/src/9/wasm32` is 9front's kernel (`port/`) on a machine whose CPUs
+are Web Workers, whose memory is one shared WebAssembly.Memory, and whose
+firmware and devices are the page (`platform.js`, `kernel.html`).  The
+page boots it as firmware boots a PC's kernel (`docs/boot.md`).
+
+## Procs and memory
+
+- No MMU, no paging: the kernel's memory is the platform's shared
+  memory, its addresses physical, from 0 (`mem.h`).  The kernel has 64 MB
+  (its image and heap); the blob, the boot file system and the
+  framebuffer are above it.
+- A Proc is a Worker of its own - its own instance of the kernel module,
+  its own `m` and `up`, the kernel's memory shared (`proc.c`).  The
+  browser schedules the Workers: sleep waits on the proc's state with
+  `Atomics.wait`, ready stores and notifies.  There is no run queue,
+  priority or preemption in the kernel.  To `port/`, the machine has one
+  CPU, `MACHP(0)`, the boot Worker, which is the clock (`clock.c`).
+- A user program is a module of its own on its proc's Worker, its memory
+  its own (`docs/wasm32.md`: one module, one address space).  Its system
+  call, `plan9.syscall(n, a)`, comes to `trap.c`: the arguments and the
+  strings and buffers they point at are copied into the kernel, so
+  9front's `sys*` and the devices see kernel addresses only, and what the
+  call wrote goes back after it.
+- fork: 3l's unwind and rewind of the stack (`docs/wasm32.md`); the
+  kernel copies the memory for the child's Worker.  rfork(RFMEM) shares
+  it: the child's Worker gets the same Memory.
+
+## Devices
+
+`devtab.c` is the configuration (no config file, no mkdevc).  9front's
+devices from `port/` - root, cons, env, pipe, dup, srv, mnt, uart, proc,
+draw, mouse, tls - and the platform's own:
+
+| | | |
+|---|---|---|
+| `#R` | `devrootfs.c` | the boot file system, read-only, from BootInfo's `rdbase`/`rdlen` (`tools/bootfs`) |
+| `#S` | `devsdw.c` | the disk, `sdW0`: a file in the origin's private file system (OPFS), a Worker's sync handle; GPT and prep partitions as sd's (`part`, `delpart`) |
+| `#I` | `devwsnet.c` | the network: `/net/tcp` and `/net/cs` over WebSockets to the page's origin, a path per port (`/567` auth, `/17019` rcpu ...) |
+| `#b` | `devkbd.c` | the keyboard: the browser's key events as runes for kbdfs |
+| `#t` | `uartwasm32.c` | the serial port `eia0`: the page's console |
+| `#ω` | `devwebauthn.c` | WebAuthn (`docs/webauthn.md`) |
+| screen | `screen.c` | XRGB32 in the kernel's memory, drawn by the page on its canvas (`platflush`) |
+
+The network's WebSockets are the page's (a Worker waiting in
+`Atomics.wait` would not hear them): what comes in the page writes into
+the conversation's ring in kernel memory; what goes out is reserved in
+the ring first, and the writer waits past `Sendhigh`, so a fast writer
+cannot fill the page.
+
+## Boot
+
+`main` takes the BootInfo, makes the memory, the procs and the devices,
+and starts init: `init=` in the config (BootInfo's plan9.ini), by default
+`/bin/rc /boot/init` from `#R`.  `/boot/init` (`sys/src/9/wasm32/init`)
+does what 9front's bootrc does on a terminal: the time zone, mntgen,
+factotum, the disk (`/boot/disk`: hjfs on `#S/sdW0` or its `fs`
+partition, glenda's home kept there), kbdfs on the console, the keys from
+secstore if there is one (`/boot/secstore`), then glenda's `rc -l`: her
+profile starts rio.

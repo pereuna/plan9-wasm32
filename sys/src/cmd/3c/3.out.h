@@ -1,5 +1,5 @@
 /*
- * 3c, 3l: WebAssembly (objtype wasm32, objects .3) - Plan2001.
+ * 3c, 3l: WebAssembly (objtype wasm32, objects .3) - Plan9-wasm32.
  *
  * The machine is an abstract one with any number of typed registers -
  * 3l makes them WebAssembly locals, and the engine's compiler allocates

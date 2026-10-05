@@ -6,7 +6,7 @@
 #include <auth.h>
 
 /*
- * (tools/test-9wasm32) D3's libraries by 3c: libsec's digests, ciphers,
+ * (tools/test/run) D3's libraries by 3c: libsec's digests, ciphers,
  * key derivations and curve25519, libmp's arithmetic, and libauthsrv's
  * dp9ik pieces - passtokey, AuthPAK and form1 tickets - against values
  * an independent implementation gives (crypto.out: Python's hashlib and
@@ -17,7 +17,7 @@
  * a server (user bootes) authenticate over a pipe with p9any (auth_proxy
  * on both sides); the users differ, so the client's factotum must get
  * the tickets from the auth server (net!p9auth.dom!ticket: /net/cs, a
- * WebSocket, tools/test-authsrv or the CPU VM's) - it makes them itself
+ * WebSocket, tools/test/authsrv or the CPU VM's) - it makes them itself
  * only for the same user.  The two get the same AuthInfo and secret.
  *
  * d3 -n rounds procs: /net/tcp reconnected - each proc connects one
@@ -253,7 +253,7 @@ pakreq(int data)
 	memset(&tr, 0, sizeof tr);
 	tr.type = AuthPAK;
 	strcpy(tr.authid, "bootes");
-	strcpy(tr.authdom, "plan2001");
+	strcpy(tr.authdom, "cirno");
 	strcpy(tr.hostid, "glenda");
 	strcpy(tr.uid, "glenda");
 	n = convTR2M(&tr, buf, sizeof buf);
@@ -270,7 +270,7 @@ conn(int ctl, char *dir)
 	char buf[64];
 	int data;
 
-	if(fprint(ctl, "connect p9auth.plan2001!567") < 0)
+	if(fprint(ctl, "connect p9auth.cirno!567") < 0)
 		return -1;
 	snprint(buf, sizeof buf, "%s/data", dir);
 	if((data = open(buf, ORDWR)) < 0)

@@ -30,3 +30,21 @@ On Linux, with gcc, Python 3, 7z, bwrap and plan9port (mk, rc, yacc):
 The live image is put in `build/live`.
 
 Status and plan: docs/plan.md.
+
+## Testing
+
+The kernel and the platform are tested in headless Chromium (`chromium`
+on PATH), each test the machine's serial console against
+`sys/src/9/wasm32/test/NAME.out`:
+
+    PLAN9=$HOME/plan9port tools/test/run            # all, about 25 minutes
+    PLAN9=$HOME/plan9port tools/test/run rc init    # these
+
+`tools/test/run` lists the tests.  A failure leaves the machine's output
+in `build/test/NAME.txt`, the page's log in `NAME.log`, and the screen in
+`NAME.png`.  The network tests talk to `tools/test/authsrv`, a stand-in
+for the origin's gateway with a dp9ik auth server, secstore and an rcpu
+relay.  A new test is a program or an rc line in `tools/test/run` and its
+expected output; the output's first line is `ticks in it: ok` with a
+`\r\n` (the kernel's console), the others end in `\n`.
+

@@ -1,11 +1,10 @@
 /*
- * Plan2001 Boot ABI v1: the BootInfo blob a loader hands the kernel,
+ * BootInfo v1: the BootInfo blob a loader hands the kernel,
  * everything it learned from the firmware.  This is the data half of the
- * contract and the same on every ISA; docs/boot-abi.md is its prose.  How
+ * contract and the same on every ISA; docs/boot.md is its prose.  How
  * the blob's address is passed and what the CPU looks like at the jump is
- * each ISA's entry ABI: docs/boot-abi-amd64.md (RDI = the blob's physical
- * address); ARM64 (X0), wasm32 (_start's argument: docs/boot-abi-wasm32.md)
- * and RISC-V (a0) will follow.  Both sides include
+ * each ISA's entry ABI: AMD64 RDI (the blob's physical address), ARM64
+ * X0, wasm32 _start's argument (docs/boot.md), RISC-V a0.  Both sides include
  * this file.  There is no fixed physical address anywhere in the contract:
  * the kernel reads its input where the loader says.
  *
@@ -46,7 +45,7 @@ enum {
 	BootArchAmd64	= 1,
 	BootArchArm64	= 2,
 	BootArchRiscv64	= 3,
-	BootArchWasm32	= 4,	/* the browser: the page is the firmware (docs/boot-abi-wasm32.md) */
+	BootArchWasm32	= 4,	/* the browser: the page is the firmware (docs/boot.md) */
 };
 
 /* BootMem.type: UEFI EFI_MEMORY_TYPE */

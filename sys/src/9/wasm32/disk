@@ -37,8 +37,8 @@ fn skel {
 }
 
 if(test -e /dev/sdW0/data){
-	# a partitioned disk (9front's: GPT, esp, plan9 with nvram and fs - an installed system's,
-	# Plan2001's /boot/install): its partitions as 9front's diskparts makes them, hjfs on fs;
+	# a partitioned disk (9front's: GPT, esp, plan9 with nvram and fs - an installed
+	# system's): its partitions as 9front's diskparts makes them, hjfs on fs;
 	# else hjfs on all of it
 	d=/dev/sdW0
 	if(! test -e $d/fs && disk/edisk -p $d/data >$d/ctl >[2]/dev/null && test -e $d/plan9)
@@ -59,8 +59,8 @@ if(test -e /dev/sdW0/data){
 			skel /usr/glenda /n/disk/usr/glenda
 			bind -c /n/disk/usr/glenda /usr/glenda
 			echo 'disk: glenda''s home is kept on this browser''s disk'
-			# a system installed on the disk (a 9front tree for wasm32: Plan2001's
-			# /boot/install): what the root has not (/sys, /wasm32, /acme ...) the
+			# a system installed on the disk (a 9front tree for wasm32):
+			# what the root has not (/sys, /wasm32, /acme ...) the
 			# disk's, its programs and /lib before the root's, its rc's after
 			if(test -d /n/disk/wasm32/bin){
 				bind -a /n/disk /

@@ -5,7 +5,7 @@
 #include <auth.h>
 
 /*
- * (tools/test-9wasm32) D4's TLS: devtls (#a, /net/tls) and libsec's
+ * (tools/test/run) D4's TLS: devtls (#a, /net/tls) and libsec's
  * handshake on the wasm32 kernel - a client and a server over a pipe
  * with a pre-shared key, as rcpu's tlsclient -a and tlssrv -a use the
  * dp9ik secret (pskID p9secret): a line each way, then a megabyte from
@@ -14,20 +14,13 @@
  *
  * d4 -s addr: an rcpu server as 9front's /rc/bin/service/tcp17019 is one
  * (tlssrv -a, then rc reads the client's script), on a connection to
- * addr - tools/test-authsrv's relay joins it to the next rcpu client
+ * addr - tools/test/authsrv's relay joins it to the next rcpu client
  * (/17019), so the machine's own rcpu, unchanged, is the client: p9any as
  * the server (user bootes), TLS with the dp9ik secret, the script on 0
  * and 1.
  *
- * d4 -w addr: webterm's rcpu session for an app's origin (D7), its server
- * side: p9any as the server (user bootes), no TLS (the WebSocket is wss),
- * then webterm's own script (appscript in plan2001/sys/src/cmd/webterm.c)
- * with a test command for the app's image - tools/test-authsrv's /rcpu
- * puts webterm's session around it, and joins it to the machine's
- * /boot/app path (rcpu, /boot/rconnect.app, aux/wsrcpu).
- *
- * d4 -B dialstring bytes: that many bytes in one write - devwsnet sends it
- * in reserved pieces, so the page never holds much more than its Sendhigh
+ * d4 -B dialstring bytes: that many bytes in writes of 4 MB (the most a
+ * write takes) - devwsnet sends each in reserved pieces, so the page never holds much more than its Sendhigh
  * however large the write (the review's).
  *
  * d4 -a: /proc/n/args written and read at once, by procs that come and
@@ -40,7 +33,7 @@
  * kill (exportfs's fatal: postnote(PNGROUP, ...)); none left after.
  */
 
-enum { Big = 1024*1024 };
+enum { Big = 1024*1024, Bwrite = 4*1024*1024 };
 
 static uchar psk[32];
 
@@ -190,65 +183,6 @@ rcpuserver(char *addr)
 	close(fd);
 	/* tcp17019's server */
 	execl("/bin/rc", "rc", "-c", ". <{n=`{read} && ! ~ $#n 0 && read -c $n} >[2=1]", nil);
-	sysfatal("exec: %r");
-}
-
-/* webterm's appscript, the app's namespace file and image a test command (%s) */
-static char appscript[] =
-	"n=`{read} && ! ~ $#n 0 && read -c $n >/dev/null || exit\n"
-	"mount -nc /fd/0 /mnt/term || exit\n"
-	"bind -q /mnt/term/dev/cons /dev/cons\n"
-	"if(test -r /mnt/term/dev/kbd){\n"
-	"	</dev/cons >/dev/cons >[2=1] aux/kbdfs -dq -m /mnt/term/dev\n"
-	"	bind -q /mnt/term/dev/cons /dev/cons\n"
-	"}\n"
-	"</dev/cons >/dev/cons >[2=1] service=cpu app=test rc -c '%s' &\n"
-	"mainproc=$apid\n"
-	"rm -f /mnt/term/env/rfailed\n"
-	"noteproc=()\n"
-	"if(test -d /mnt/term/mnt/cpunote){\n"
-	"	{cat; echo -n hangup} </mnt/term/mnt/cpunote/data >/proc/$mainproc/notepg &\n"
-	"	noteproc=$apid\n"
-	"}\n"
-	"wait $mainproc\n"
-	"echo -n $status >/mnt/term/env/rstatus >[2]/dev/null\n"
-	"~ $#noteproc 0 || echo -n hangup >/proc/$noteproc/notepg\n"
-	"echo -n hangup >/proc/$pid/notepg\n";
-
-/* -w: the terminal's namespace, its keyboard, draw, and a file copied both ways */
-static char appone[] =
-	"echo app $app: service $service; cat /mnt/term/env/sysname; echo; "
-	"test -e /mnt/term/dev/kbd || echo no kbd: the console is the keyboard; test -e /mnt/term/dev/draw/new && echo the terminal draws; "
-	"cp /mnt/term/bin/rc /mnt/term/mnt/ram/rc; n=`{wc -c </mnt/term/bin/rc}; m=`{wc -c </mnt/term/mnt/ram/rc}; "
-	"if(~ $m $n) echo rc copied there and back; if not echo rc: $n bytes, the copy $m; echo app done";
-
-/*
- * -W: sixteen copies at once, both ways - the session holds 16 writes when
- * its page is dropped, more than the page's 64 KiB ring: the resume's one
- * frame waits in the page's queue (the review's)
- */
-static char appmany[] =
-	"for(i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16) { cp /mnt/term/bin/echo /mnt/term/mnt/ram/e$i & }; "
-	"wait; n=`{wc -c </mnt/term/bin/echo}; for(i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16) { m=`{wc -c </mnt/term/mnt/ram/e$i}; ~ $m $n || echo e$i: $m bytes, not $n }; "
-	"echo 16 copies of echo; echo app done";
-
-static void
-appserver(char *addr, char *cmd)
-{
-	int fd;
-	AuthInfo *ai;
-
-	rfork(RFNOTEG|RFNAMEG);	/* as rcpuserver */
-	if((fd = dial(addr, nil, nil, nil)) < 0)
-		sysfatal("dial %s: %r", addr);
-	/* webterm's rcpu(): p9any as the server, the bytes then straight through */
-	if((ai = auth_proxy(fd, nil, "proto=p9any role=server user=bootes")) == nil)
-		sysfatal("auth: %r");
-	auth_freeAI(ai);
-	dup(fd, 0);
-	dup(fd, 1);
-	close(fd);
-	execl("/bin/rc", "rc", "-c", smprint(appscript, cmd), nil);
 	sysfatal("exec: %r");
 }
 
@@ -403,22 +337,21 @@ main(int argc, char **argv)
 		long n;
 		uchar *b;
 
+		long m;
+
 		n = atol(argv[3]);
-		if((b = mallocz(n, 1)) == nil)
-			sysfatal("no memory for %ld", n);
+		m = n < Bwrite ? n : Bwrite;
+		if((b = mallocz(m, 1)) == nil)
+			sysfatal("no memory for %ld", m);
 		if((fd = dial(argv[2], nil, nil, nil)) < 0)
 			sysfatal("dial %s: %r", argv[2]);
-		if(write(fd, b, n) != n)
-			sysfatal("write: %r");
+		for(; n > 0; n -= m){
+			if(m > n)
+				m = n;
+			if(write(fd, b, m) != m)
+				sysfatal("write: %r");
+		}
 		print("written\n");
-		exits(nil);
-	}
-	if(argc == 3 && strcmp(argv[1], "-w") == 0){
-		appserver(argv[2], appone);
-		exits(nil);
-	}
-	if(argc == 3 && strcmp(argv[1], "-W") == 0){
-		appserver(argv[2], appmany);
 		exits(nil);
 	}
 

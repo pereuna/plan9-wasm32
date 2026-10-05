@@ -1,7 +1,7 @@
 # the wasm32 machine's boot file system (#R: the page gives it with the
 # kernel, as 9front's kernel has its bootfs.paq): what init, /boot/disk and
 # /boot/secstore run, rc, rio and glenda's terminal (her profile's
-# webcookies and webfs, riostart's stats).  rc's rcmain is its source's:
+# webcookies and webfs, riostart's stats; rcpu).  rc's rcmain is its source's:
 # the release's /rc/lib/rcmain is older than its rc.  disk/mkfs's form:
 # name, mode, owner, group, and the file it is (from the tree's root; -
 # the same path); + all below.  tools/bootfs makes the archive.
@@ -76,6 +76,8 @@ lib
 				+
 rc
 	bin
+		rconnect
+		rcpu
 		window
 		wloc
 	lib

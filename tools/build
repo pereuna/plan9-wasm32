@@ -12,7 +12,7 @@ here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
 tree=$root/build/tree
 "$here/tree" "$tree"
 TREE=$tree "$here/native" >"$root/build/native.log" 2>&1 || { tail -20 "$root/build/native.log"; echo "build: tools/native failed (build/native.log)" >&2; exit 1; }
-"$here/bootfs" "$tree" "$tree/sys/src/9/wasm32/bootfs.proto" "$root/build/root.fs"
+"$here/bootfs" "$tree" "$root/build/root.fs"
 live=$root/build/live
 w=$tree/sys/src/9/wasm32
 rm -rf "$live"; mkdir -p "$live"

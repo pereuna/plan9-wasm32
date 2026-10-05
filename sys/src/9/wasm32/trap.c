@@ -7,7 +7,7 @@
 #include	"../../libc/9syscall/sys.h"
 
 /*
- * wasm32's system calls (docs/architecture.md, phase C).  A program is
+ * wasm32's system calls (docs/kernel.md).  A program is
  * a module of its own on its proc's Worker, its memory its own; its
  * plan9.syscall(n, a) comes here (platform.js, platuser), a the address
  * of its arguments - 4-byte words, a vlong two - in its memory.  The

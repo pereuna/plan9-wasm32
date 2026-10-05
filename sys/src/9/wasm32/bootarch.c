@@ -5,8 +5,8 @@
 #include "fns.h"
 
 /*
- * wasm32's side of port/bootinfo.c (Plan2001 Boot ABI v1,
- * docs/boot-abi-wasm32.md): the page is the firmware and the loader -
+ * wasm32's side of port/bootinfo.c (BootInfo v1,
+ * docs/boot.md): the page is the firmware and the loader -
  * it makes the BootInfo blob in the machine's memory and enters the
  * kernel at _start with the blob's address as main's argument.  The
  * kernel's addresses are the memory's own (no MMU), so the early map is

@@ -6,5 +6,5 @@ deeper
 /n/disk/usr/glenda/lib/plumbing
 /n/disk/usr/glenda/lib/profile
 # mine
-inquiry Plan2001 OPFS disk
+inquiry Plan9-wasm32 OPFS disk
 done

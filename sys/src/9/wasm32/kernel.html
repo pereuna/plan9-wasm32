@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Plan2001 wasm32</title>
-<meta name="plan2001-version" content="@VERSION@">
+<title>Plan9-wasm32</title>
+<meta name="plan9-version" content="@VERSION@">
 <style>
 	:root { --bg: #fff; --fg: #000; }
 	@media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #ddd; } }
@@ -16,14 +16,10 @@
 	body.console { overflow: auto; }
 	body.console canvas { width: auto; height: auto; max-width: 100%; margin: 0 auto; }
 	body.console pre { display: block; }
-	/* the site's login (/boot/login): the console alone, its prompt in view, until rio draws */
-	body.login canvas { display: none; }
-	body.login pre { min-height: 100vh; box-sizing: border-box; }
 	/* a touch screen's key bar (body.touch): the keys a phone's keyboard lacks, and the mouse's buttons */
 	#bar { display: none; position: fixed; left: 0; right: 0; bottom: 0; height: 44px; background: #333; gap: 3px; padding: 4px 3px; box-sizing: border-box; overflow-x: auto; }
 	body.touch #bar { display: flex; }
 	body.touch { --barh: 44px; }
-	body.touch.login pre { padding-bottom: 60px; }
 	#bar button { flex: 1 0 auto; min-width: 28px; padding: 0 4px; font: 14px monospace; color: #fff; background: #555; border: 0; border-radius: 4px; touch-action: manipulation; }
 	#bar button.on { background: #2a7; }
 	/* a phone's keyboard: it opens for a text field, this one, off the screen (a touch focuses it) */
@@ -32,7 +28,7 @@
 </style>
 </head>
 <body>
-<!-- Plan2001's wasm32 machine (sys/src/9/wasm32): its screen the window (?screen=WxH another size), its serial port with ?console=1 -->
+<!-- Plan9-wasm32's machine (sys/src/9/wasm32): its screen the window (?screen=WxH another size), its serial port with ?console=1 -->
 <canvas id="screen" width="800" height="600"></canvas>
 <pre id="eia0"></pre>
 <pre id="halt"></pre>
@@ -41,10 +37,10 @@
 <script type="module">
 import { boot, diskboot } from './platform.js';
 const pre = document.getElementById('eia0'), dec = new TextDecoder();
-/* the page's version (monolith/tools/pages: the commit and its time), so that a cached page shows */
-const version = document.querySelector('meta[name=plan2001-version]')?.content ?? '';
+/* the page's version (tools/build: the commit and its time), so that a cached page shows */
+const version = document.querySelector('meta[name=plan9-version]')?.content ?? '';
 if (version && !version.startsWith('@')) {
-	pre.textContent = 'Plan2001 page ' + version + '\n';
+	pre.textContent = 'Plan9-wasm32 page ' + version + '\n';
 	document.title += ' ' + version;
 }
 // init: ?arg=... what it runs, /boot/init (kbdfs and rc) without; ?noinit=1 none (C2a's test);
@@ -53,42 +49,20 @@ const q = new URLSearchParams(location.search);
 if ((q.get('console') === '1')) document.body.classList.add('console');
 const args = q.has('noinit') ? [] : q.getAll('arg').length ? q.getAll('arg') : ['/bin/rc', '/boot/init'];
 /*
- * the origin's app (docs/app-origins.md, D7): the server's answer (GET /app,
- * rc-httpd's, as webterm decides it), term without one (a test's server, the
- * sandbox).  An app's machine runs it on the CPU server (/boot/app); the
- * terminal's has rio here and rcpu to $cpu, the page's host
+ * plan9.ini from the server, if it has one (as 9front's ISO has its own): its lines go into
+ * BootInfo's config with the firmware's - e.g. secstore= (/boot/secstore gets factotum's keys
+ * from it) or passkeyrp= (#ω's rp, docs/webauthn.md); cpu= is the page's host
  */
-const app = await fetch('app', { cache: 'no-store' }).then((r) => r.ok ? r.text() : 'term').catch(() => 'term');
-const appname = /^[a-z0-9-]{1,32}$/.test(app.trim()) ? app.trim() : 'term';
-/*
- * the server's secstore, if it has one (GET /secstore: its dial string, a file of the site):
- * the terminal's /boot/init gets factotum's keys from it (/boot/secstore; docs/architecture.md,
- * "Avainten paikka"); without it no password is asked
- */
-const sec = appname === 'term' ? await fetch('secstore', { cache: 'no-store' }).then((r) => r.ok ? r.text() : '').catch(() => '') : '';
-const secstore = /^[a-z0-9.!-]{1,64}$/.test(sec.trim()) ? sec.trim() : '';
-/*
- * and its login (GET /login: the site has accounts and passkeys, docs/webauthn.md): /boot/login's
- * menu.  The file is the passkeys' rp - the site's domain, so that APP.SITE has the same passkeys -
- * if it is this page's host or above it (else 1: the page's host)
- */
-const logintext = appname === 'term' ? await fetch('login', { cache: 'no-store' }).then((r) => r.ok ? r.text() : null).catch(() => null) : null;
-const login = logintext !== null;
-const rpname = (logintext ?? '').trim().toLowerCase();
-const passkeyrp = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(rpname) && (location.hostname === rpname || location.hostname.endsWith('.' + rpname)) ? rpname : '';
-/* the site's login (/boot/login) is on the console too, until a program draws on the screen (rio) */
-const loginconsole = () => login && appname === 'term' && !(q.get('console') === '1');
-if (loginconsole()) document.body.classList.add('console', 'login');
-const machine = 'cpu=' + location.hostname + '\n' + (appname !== 'term' ? 'app=' + appname + '\n' : '') +
-	(secstore ? 'secstore=' + secstore + '\n' : '') + (login ? 'login=1\n' : '') + (passkeyrp ? 'passkeyrp=' + passkeyrp + '\n' : '');
-if (appname !== 'term') document.body.classList.add('console');	/* its key is asked on the console */
+const ini = await fetch('plan9.ini', { cache: 'no-store' }).then((r) => r.ok ? r.text() : '').catch(() => '');
+const iniconf = (t) => t.replace(/\r/g, '').split('\n').filter((l) => /^[a-zA-Z*][^=]*=/.test(l)).map((l) => l + '\n').join('');
+const machine = 'cpu=' + location.hostname + '\n' + iniconf(ini);
 /* a touch screen (a phone): the key bar, and the screen above it */
 const touch = matchMedia('(pointer: coarse)').matches;
 if (touch) document.body.classList.add('touch');
 const barh = touch ? 44 : 0;
 
-// the root (tools/build-bin3): each file's path and 0, its length (4 bytes), its bytes (rootfs.c);
-// w3root.fs is all of it, one file (a server that has no directories: webterm), else each from w3root.txt
+// the boot file system (tools/bootfs): each file's path and 0, its length (4 bytes), its bytes
+// (devrootfs.c); w3root.fs is all of it, one file, else each from w3root.txt
 async function rootfs() {
 	const fs = await fetch('w3root.fs');
 	if (fs.ok) return new Uint8Array(await fs.arrayBuffer());
@@ -116,7 +90,7 @@ const K = { Enter: '\n', Backspace: '\b', Tab: '\t', Escape: '\x1b', Delete: '\x
 const down = new Map();	/* e.code: the rune its down sent, for its up */
 document.addEventListener('keydown', (e) => {
 	/* Meta itself is Plan 9's Kmod4; Meta with another key is the browser's (its shortcuts) */
-	if (!window.monolith || e.metaKey && e.key !== 'Meta') return;
+	if (!window.plan9 || e.metaKey && e.key !== 'Meta') return;
 	/* Ctrl-C with text selected (the console's) is the browser's copy */
 	if (e.ctrlKey && (e.key === 'c' || e.key === 'C' || e.key === 'Insert') && String(getSelection()).length) return;
 	/* Ctrl-V and Shift-Insert are the browser's paste: its paste event types the text (kernelpaste) */
@@ -124,19 +98,19 @@ document.addEventListener('keydown', (e) => {
 	const r = K[e.key] ?? ([...e.key].length === 1 ? e.key : undefined);
 	if (r === undefined) return;
 	down.set(e.code, r);
-	window.monolith.kbd('r' + r + '\0');
+	window.plan9.kbd('r' + r + '\0');
 	e.preventDefault();
 });
 document.addEventListener('keyup', (e) => {
-	if (!window.monolith) return;
+	if (!window.plan9) return;
 	const r = down.get(e.code);
 	if (r === undefined) return;
 	down.delete(e.code);
-	window.monolith.kbd('R' + r + '\0');
+	window.plan9.kbd('R' + r + '\0');
 	e.preventDefault();
 });
 window.addEventListener('blur', () => {	/* keys let go elsewhere */
-	for (const r of down.values()) window.monolith?.kbd('R' + r + '\0');
+	for (const r of down.values()) window.plan9?.kbd('R' + r + '\0');
 	down.clear();
 });
 /*
@@ -146,9 +120,9 @@ window.addEventListener('blur', () => {	/* keys let go elsewhere */
  * Ctrl-V, and kbdfs would make the text control characters
  */
 window.kernelpaste = (text) => {
-	if (!window.monolith) return;
-	for (const k of ['Shift', 'Control', 'Alt', 'AltGraph', 'Meta']) window.monolith.kbd('R' + K[k] + '\0');
-	for (const c of text.replace(/\r\n?/g, '\n')) window.monolith.kbd('r' + c + '\0R' + c + '\0');
+	if (!window.plan9) return;
+	for (const k of ['Shift', 'Control', 'Alt', 'AltGraph', 'Meta']) window.plan9.kbd('R' + K[k] + '\0');
+	for (const c of text.replace(/\r\n?/g, '\n')) window.plan9.kbd('r' + c + '\0R' + c + '\0');
 };
 /*
  * a phone: its keyboard types into #kbd (its keydowns are 'Unidentified', or none): what goes in
@@ -158,17 +132,17 @@ window.kernelpaste = (text) => {
 const kbdfield = document.getElementById('kbd');
 const kbdreset = () => { kbdfield.value = ' '; kbdfield.setSelectionRange(1, 1); };	/* a space: Backspace has something to delete */
 kbdfield.addEventListener('input', (e) => {
-	if (window.monolith) {
-		if (e.inputType === 'deleteContentBackward') window.monolith.kbd('r' + K.Backspace + '\0R' + K.Backspace + '\0');
-		else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') window.monolith.kbd('r\n\0R\n\0');
+	if (window.plan9) {
+		if (e.inputType === 'deleteContentBackward') window.plan9.kbd('r' + K.Backspace + '\0R' + K.Backspace + '\0');
+		else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') window.plan9.kbd('r\n\0R\n\0');
 		else if (e.data && ctrl) {	/* the bar's Ctrl: the next key with it */
-			window.monolith.kbd('r' + K.Control + '\0');
-			for (const c of e.data) window.monolith.kbd('r' + c + '\0R' + c + '\0');
-			window.monolith.kbd('R' + K.Control + '\0');
+			window.plan9.kbd('r' + K.Control + '\0');
+			for (const c of e.data) window.plan9.kbd('r' + c + '\0R' + c + '\0');
+			window.plan9.kbd('R' + K.Control + '\0');
 			ctrl = false;
 			bar.querySelector('[data-k=ctrl]').classList.remove('on');
 		}
-		else if (e.data) for (const c of e.data) window.monolith.kbd('r' + c + '\0R' + c + '\0');
+		else if (e.data) for (const c of e.data) window.plan9.kbd('r' + c + '\0R' + c + '\0');
 	}
 	kbdreset();
 });
@@ -179,7 +153,7 @@ kbdfield.addEventListener('focus', kbdreset);
  */
 let ctrl = false, touchbutton = 1;
 const bar = document.getElementById('bar');
-const typekey = (r) => window.monolith?.kbd('r' + r + '\0R' + r + '\0');
+const typekey = (r) => window.plan9?.kbd('r' + r + '\0R' + r + '\0');
 bar.addEventListener('pointerdown', (e) => e.preventDefault());	/* the keyboard stays open */
 bar.addEventListener('click', (e) => {
 	const b = e.target.closest('button');
@@ -201,38 +175,32 @@ document.addEventListener('paste', (e) => {
 });
 
 /*
- * where it boots from, as a machine's firmware: the disk's esp (an installed system: Plan2001's
- * /boot/install put the kernel, its boot root and plan9.ini there) unless ?boot=net or a test's own
+ * where it boots from, as a machine's firmware: the disk's esp (an installed system: the
+ * installer put the kernel, its boot root and plan9.ini there) unless ?boot=net or a test's own
  * init (?arg=, ?noinit); else the network's, this site's.  ?boot=disk the disk's whatever the args
  */
 const usedisk = q.get('disk') !== '0' && (q.get('boot') === 'disk' || q.get('boot') !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
 const fromdisk = usedisk ? await diskboot().catch(() => null) : null;
-if (fromdisk) pre.textContent += 'Plan2001 boots from the disk (esp: its kernel and boot root)\n';
+if (fromdisk) pre.textContent += 'Plan9-wasm32 boots from the disk (esp: its kernel and boot root)\n';
 boot(fromdisk ? fromdisk.kernel : '9wasm32.wasm', {
-	eia: (b) => {
-		pre.textContent += dec.decode(b, { stream: true });
-		if (document.body.classList.contains('login')) scrollTo(0, document.body.scrollHeight);	/* the prompt in view */
-	},
-	drawn: () => { if (loginconsole()) document.body.classList.remove('console', 'login'); },
+	eia: (b) => { pre.textContent += dec.decode(b, { stream: true }); },
 	halt: (why) => {
 		pre.textContent += '\n[halted: ' + why + ']\n';
-		if (!(q.get('console') === '1')) { const h = document.getElementById('halt'); h.textContent = 'Plan2001 halted: ' + why; h.style.display = 'block'; }
+		if (!(q.get('console') === '1')) { const h = document.getElementById('halt'); h.textContent = 'Plan9-wasm32 halted: ' + why; h.style.display = 'block'; }
 	},
 	fs: args.length ? (fromdisk ? fromdisk.fs : await rootfs()) : undefined,
 	args,
 	/* the machine's disk (#S/sdW0): OPFS, ?disk=MB (4096: room for an installed system and its esp), ?disk=0 none */
 	disk: (q.get('disk') ?? '4096') !== '0' && navigator.storage?.getDirectory ? { name: 'sdW0', size: Number(q.get('disk') ?? 4096) * 1048576, fail: q.get('diskfail') } : null,
-	config: machine + (fromdisk ? fromdisk.conf.replace(/\r/g, '').split('\n').filter((l) => /^[a-zA-Z*][^=]*=/.test(l)).map((l) => l + '\n').join('') : '') + q.getAll('conf').map((c) => c + '\n').join(''),
+	config: machine + (fromdisk ? iniconf(fromdisk.conf) : '') + q.getAll('conf').map((c) => c + '\n').join(''),
 	canvas: document.getElementById('screen'),
 	touchbutton: () => touchbutton,
 	screen: (([w, h]) => ({ w: Number(w) || ((q.get('console') === '1') ? 800 : innerWidth), h: Number(h) || ((q.get('console') === '1') ? 600 : innerHeight - barh) }))((q.get('screen') ?? '').split('x')),
-	/* the machine's webterm, as Monolith's page finds it: ?ws=, wss on https, else the next port */
 	/*
-	 * the machine's network: this origin's own webterm, nothing a URL can
-	 * change - an app's rcpu has no TLS of its own inside the WebSocket
-	 * (aux/wsrcpu), so the page must not be pointed elsewhere (the review's:
-	 * ?ws= was a man in the middle).  https: wss on this host; http only
-	 * on loopback, the next port (tools/serve's relay: development and tests)
+	 * the machine's network: this origin's own gateway, nothing a URL can
+	 * change (a page pointed elsewhere would be a man in the middle).
+	 * https: wss on this host; http only on loopback, the next port
+	 * (tools/serve's relay: offline and the tests)
 	 */
 	ws: location.protocol === 'https:' ? `wss://${location.host}`
 		: /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname) ? `ws://${location.hostname}:${location.port ? +location.port + 1 : 8081}`

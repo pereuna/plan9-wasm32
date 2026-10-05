@@ -10,7 +10,7 @@
 #include	"ureg.h"
 
 /*
- * wasm32's procs (docs/architecture.md, phase C): 9front's proc.c
+ * wasm32's procs (docs/kernel.md): 9front's proc.c
  * without its scheduler.  A Proc is a Worker of its own - its own
  * instance of the kernel, its own m and up, the kernel's memory shared.
  * The browser schedules the Workers; there is no run queue, no

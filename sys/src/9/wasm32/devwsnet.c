@@ -6,12 +6,12 @@
 #include	"../port/error.h"
 
 /*
- * #I: wasm32's network, /net/tcp over WebSockets (docs/architecture.md,
- * D2).  A browser opens no TCP connections: a connection is a WebSocket
- * to the machine's webterm (sys/src/cmd/webterm.c), which carries a
- * service's bytes unchanged - GET /17019 rcpu, /567 auth - as drawterm's
- * wsock.c does.  The address's host is not used: the WebSocket server is
- * the machine.  The page owns the WebSockets (a Worker waits in
+ * #I: wasm32's network, /net/tcp over WebSockets (docs/kernel.md).  A
+ * browser opens no TCP connections: a connection is a WebSocket to the
+ * page's origin, whose gateway (a webterm) carries a service's bytes
+ * unchanged - GET /17019 rcpu, /567 auth - as drawterm's wsock.c does.
+ * The address's host is not used: the WebSocket server is the machine's
+ * gateway.  The page owns the WebSockets (a Worker waits in
  * Atomics.wait and would not hear them): what comes in it writes into
  * the conversation's ring here, what goes out goes to it as a message.
  * A conversation's WebSocket is the page's by (n, gen): a new gen each
@@ -97,10 +97,6 @@ static struct {
 	"ticket",	"567",
 	"exportfs",	"17007",
 	"secstore",	"5356",
-	"signup",	"17040",	/* Plan2001's accounts (docs/webauthn.md) */
-	"passkey",	"17041",
-	"dist",		"17050",	/* the wasm32 distribution (aux/distd: Plan2001's /boot/install) */
-	"rcpuws",	"/rcpu",	/* webterm's rcpu session for an app's origin: GET /rcpu (aux/wsrcpu, D7) */
 };
 
 static int
@@ -332,8 +328,8 @@ netwait(long *w, long v, int secs)
  * queue without limit) - and the writer waits while the reservation would
  * take sendq past Sendhigh, as at a full pipe; with sendq 0 a piece always
  * goes, so the page holds at most Sendhigh+Sendchunk.  The page takes off
- * what it no longer holds: sent (a plain WebSocket) or acknowledged
- * (webterm's session).  Not under the conversation's QLock: a hangup does
+ * what it no longer holds: what has left the WebSocket's buffer.  Not
+ * under the conversation's QLock: a hangup does
  * not wait for it; a note interrupts.
  */
 static void

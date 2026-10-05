@@ -3,7 +3,7 @@
 
 /*
  * #ω, the page's WebAuthn (devwebauthn.c, docs/webauthn.md), with the test's
- * browser's virtual authenticator (tools/test-wasmapp WEBAUTHN: its PRF,
+ * browser's virtual authenticator (tools/test/wasmapp WEBAUTHN: its PRF,
  * and the page's buttons clicked): a passkey for glenda made, then got -
  * its PRF output 32 bytes, the same for the same salt and another for
  * another, its user handle glenda without the id given; a request
@@ -14,8 +14,8 @@
 enum { Nans = 16*1024 };
 
 static char *rp;
-static char *salt1 = "plan2001 test salt 1";
-static char *salt2 = "plan2001 test salt 2";
+static char *salt1 = "plan9-wasm32 test salt 1";
+static char *salt2 = "plan9-wasm32 test salt 2";
 
 /* base64url, no padding, as WebAuthn's */
 static char*

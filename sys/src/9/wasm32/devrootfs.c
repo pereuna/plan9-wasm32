@@ -7,7 +7,7 @@
 
 /*
  * #R: the machine's root files, read-only - what the page gave at boot
- * (BootInfo's rdbase and rdlen, docs/boot-abi-wasm32.md: build/wasm32/root.fs, tools/build-bin3).  The
+ * (BootInfo's rdbase and rdlen, docs/boot.md: tools/bootfs's archive).  The
  * archive is, for each file, its path (a/b/c: no leading /, no empty
  * element, no . or ..) and a 0, its length in four bytes, little-endian,
  * and its bytes (a name ending in / an empty directory, no bytes); its

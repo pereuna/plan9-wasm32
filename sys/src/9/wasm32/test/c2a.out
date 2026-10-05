@@ -1,4 +1,4 @@
-Plan2001 wasm32 kernel: 9front's port/
+Plan9-wasm32 kernel: 9front's port/
 written to #c/cons
 #e/sysname: wasm32
 caught: file does not exist: '#c/nonexistent'

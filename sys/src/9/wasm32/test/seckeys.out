@@ -2,7 +2,7 @@ ticks in it: ok
 disk: a new disk, hjfs -r
 disk: glenda's home is kept on this browser's disk
 relay
-secstore: saved 121 bytes
+secstore: saved 118 bytes
 secstore password: 
 relay
 aux/seckeys: 2 keys from secstore
@@ -12,7 +12,7 @@ secstore password:
 aux/seckeys: wrong password
 secstore password: 
 aux/seckeys: no secstore: 2 keys from the copy
-key proto=dp9ik dom=plan2001 user=bootes !password?
-key proto=dp9ik dom=plan2001 user=glenda !password?
+key proto=dp9ik dom=cirno user=bootes !password?
+key proto=dp9ik dom=cirno user=glenda !password?
 key proto=pass service=mail user=glenda !password?
 done

@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""Plan9-wasm32's machine in headless Chromium, real time: tools/serve's
+page (kernel.html: the machine's firmware) from $SITE (tools/test/run's
+build/test/site) with init's arguments, until the machine halts
+(KERNEL-HALT); tools/test/run runs it for each test.
+  SERIAL=1 EXPECT=FILE tools/test/wasmapp NAME
+                                           its eia0 against FILE
+  SERIAL=1 [SEND='["line\n", ["prompt", "line\n"], ...]'] [SENDFILE=F] [EXPECT=FILE]
+                                           its console #t/eia0, the platform's
+                                           serial port: text, not pixels; SEND
+                                           typed there a line at a time when its
+                                           output has settled, then F's bytes;
+                                           what it said (bytes) in
+                                           build/test/NAME.txt, the same as FILE
+  ARGS='["/bin/rc", ...]'                  init's argv (?arg=); PAGEARGS='&x=1' more of the URL
+  THEN='["arg", ...]'                      once it halts, the page again in the same
+                                           browser (its OPFS) with these args;
+                                           EXPECT is the second load's
+  WEBAUTHN='["go", "cancel", ...]'         a virtual authenticator (the DevTools
+                                           protocol's, with PRF) for the page's
+                                           passkeys (#ω, devwebauthn.c), and its
+                                           buttons clicked in this order: go
+                                           (the request's), phone or key (with
+                                           a cross-platform one) or cancel
+  WEBAUTHN_NOPRF=1                         the virtual authenticators without PRF
+  PAGEURL=https://plan2001.com/plan9-wasm32/  a site's page instead of tools/serve's
+  TOUCH=1                                  a phone: a touch screen 400x700
+  PAGEHOST=localhost                       the page from this host (WebAuthn
+                                           takes no IP address for its rp)
+  GATEWAY=PORT                             tools/serve's relay to it (tools/test/authsrv)
+  PLAN9INI='a=b'                           the page's plan9.ini
+"""
+import base64, json, os, re, shutil, socket, struct, subprocess, sys, tempfile, time, urllib.parse, urllib.request
+
+root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+out = os.path.join(root, 'build/test')
+os.makedirs(out, exist_ok=True)
+DEVTOOLS = 19224
+HTTP = int(os.environ.get('HTTPPORT', '18092'))
+
+class Cdp:
+	"""The DevTools protocol over a minimal WebSocket client (text frames)."""
+	def __init__(self, url):
+		u = urllib.parse.urlparse(url)
+		self.s = socket.create_connection((u.hostname, u.port))
+		key = base64.b64encode(os.urandom(16)).decode()
+		self.s.sendall((f'GET {u.path} HTTP/1.1\r\nHost: {u.netloc}\r\nUpgrade: websocket\r\n'
+			f'Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n').encode())
+		resp = b''
+		while b'\r\n\r\n' not in resp:
+			resp += self.s.recv(1)
+		if b' 101 ' not in resp.split(b'\r\n')[0]:
+			raise SystemExit(f'wasmapp: DevTools handshake: {resp[:80]}')
+		self.id = 0
+		self.log = []	# the page's console
+
+	def read(self, n):
+		b = b''
+		while len(b) < n:
+			x = self.s.recv(n - len(b))
+			if not x:
+				raise SystemExit('wasmapp: DevTools connection closed')
+			b += x
+		return b
+
+	def send(self, text):
+		data = text.encode()
+		n = len(data)
+		hdr = bytes([0x81]) + (bytes([0x80 | n]) if n < 126 else
+			bytes([0x80 | 126]) + struct.pack('>H', n) if n < 65536 else
+			bytes([0x80 | 127]) + struct.pack('>Q', n))
+		mask = os.urandom(4)
+		self.s.sendall(hdr + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(data)))
+
+	def recv(self):
+		msg = b''
+		while True:
+			b0, b1 = self.read(2)
+			n = b1 & 0x7f
+			if n == 126:
+				n = struct.unpack('>H', self.read(2))[0]
+			elif n == 127:
+				n = struct.unpack('>Q', self.read(8))[0]
+			data = self.read(n)
+			if b0 & 0x0f in (1, 2, 0):
+				msg += data
+				if b0 & 0x80:
+					return msg
+
+	def call(self, method, **params):
+		self.id += 1
+		self.send(json.dumps({'id': self.id, 'method': method, 'params': params}))
+		while True:
+			r = json.loads(self.recv())
+			if r.get('method') == 'Runtime.consoleAPICalled':
+				self.log.append(' '.join(str(a.get('value', a.get('description', ''))) for a in r['params']['args']))
+			elif r.get('method') == 'Runtime.exceptionThrown':
+				self.log.append('EXCEPTION ' + json.dumps(r['params']['exceptionDetails'].get('exception', {}).get('description')))
+			if r.get('id') == self.id:
+				if 'error' in r:
+					raise RuntimeError(f'{method}: {r["error"]}')
+				return r.get('result', {})
+
+	def js(self, expr):
+		r = self.call('Runtime.evaluate', expression=expr, returnByValue=True)
+		return r.get('result', {}).get('value')
+
+
+def wait(cdp, expr, secs, what):
+	end = time.time() + secs
+	while time.time() < end:
+		try:
+			if cdp.js(expr):
+				return
+		except RuntimeError:	# the page still loading
+			pass
+		time.sleep(0.5)
+	st = cdp.js("(document.getElementById('status') || {}).textContent")
+	raise SystemExit(f'wasmapp: timed out waiting for {what} (page: {st!r})')
+
+
+
+SIG = """(() => { const c = document.getElementById('screen');
+	const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+	const s = new Set();
+	for (let i = 0; i < d.length; i += 4 * 97) { const v = d[i] << 16 | d[i+1] << 8 | d[i+2]; s.add(v); }
+	const t = c.getContext('2d').getImageData(c.width >> 1, 36, 1, 1).data;
+	return [s.size, t[0] == 0xaa && t[1] == 0xaa && t[2] == 0xaa]; })()"""
+
+
+def main():
+	name = sys.argv[1] if len(sys.argv) > 1 else 'kernel'
+	secs = float(sys.argv[2]) if len(sys.argv) > 2 else 8
+	tmp = tempfile.mkdtemp()
+	srv = subprocess.Popen([os.path.join(root, 'tools/serve'), '-d', os.environ.get('SITE') or os.path.join(out, 'site'),
+		'-g', os.environ.get('GATEWAY') or '17080', str(HTTP)],
+		stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	chrome = subprocess.Popen(['chromium', '--headless=new', '--no-sandbox', '--disable-gpu',
+		f'--user-data-dir={tmp}', f'--remote-debugging-port={DEVTOOLS}', '--window-size=600,600', 'about:blank'],
+		stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	try:
+		for _ in range(50):
+			try:
+				urllib.request.urlopen(f'http://127.0.0.1:{DEVTOOLS}/json')
+				urllib.request.urlopen(f'http://127.0.0.1:{HTTP}/')
+				break
+			except Exception:
+				time.sleep(0.2)
+		url = f'http://{os.environ.get("PAGEHOST", "127.0.0.1")}:{HTTP}/?x=1' + os.environ.get('PAGEARGS', '')	# PAGEARGS='&failfork=1'
+		if os.environ.get('PAGEURL'):	# PAGEURL=https://...: a site's page (by hand: what a person there gets)
+			url = os.environ['PAGEURL'] + '?x=1' + os.environ.get('PAGEARGS', '')
+		def withargs(url, args):
+			for a in args:	# ARGS='["-c", "echo hi"]'
+				url += '&arg=' + urllib.parse.quote(a, safe='')
+			if os.environ.get('DEBUG'):
+				url += '&debug=' + os.environ['DEBUG']
+			if os.environ.get('SERIAL'):
+				url += '&console=eia0'
+			return url
+		base = url
+		url = withargs(base, json.loads(os.environ.get('ARGS', '[]')))
+		serial = bool(os.environ.get('SERIAL'))
+		t = json.loads(urllib.request.urlopen(urllib.request.Request(
+			f'http://127.0.0.1:{DEVTOOLS}/json/new?{urllib.parse.quote(url, safe="")}', method='PUT')).read())
+		cdp = Cdp(t['webSocketDebuggerUrl'])
+		cdp.call('Page.enable')
+		cdp.call('Runtime.enable')
+		if os.environ.get('TOUCH'):	# TOUCH=1: a phone - a touch screen 400x700, the page loaded again as one
+			cdp.call('Emulation.setDeviceMetricsOverride', width=400, height=700, deviceScaleFactor=1, mobile=True)
+			cdp.call('Emulation.setTouchEmulationEnabled', enabled=True, maxTouchPoints=5)
+			for i in range(20):	# the tab may still be between pages
+				try:
+					cdp.call('Page.reload', ignoreCache=True)
+					break
+				except RuntimeError:
+					if i == 19:
+						raise
+					time.sleep(0.5)
+			time.sleep(1)
+		# WEBAUTHN: the browser's passkeys are a virtual authenticator's, its PRF on; the page's
+		# buttons (devwebauthn.c's requests) clicked as a person would, in the order given
+		webauthn = json.loads(os.environ.get('WEBAUTHN', 'null'))
+		if webauthn is not None:
+			cdp.call('WebAuthn.enable', enableUI=False)
+			cdp.call('WebAuthn.addVirtualAuthenticator', options={'protocol': 'ctap2', 'ctap2Version': 'ctap2_1',
+				'transport': 'internal', 'hasResidentKey': True, 'hasUserVerification': True,
+				'isUserVerified': True, 'hasPrf': not os.environ.get('WEBAUTHN_NOPRF'), 'automaticPresenceSimulation': True})
+			if 'phone' in webauthn or 'key' in webauthn:	# the page's phone or security key button: a cross-platform authenticator (a phone's, as hybrid would be)
+				cdp.call('WebAuthn.addVirtualAuthenticator', options={'protocol': 'ctap2', 'ctap2Version': 'ctap2_1',
+					'transport': 'usb', 'hasResidentKey': True, 'hasUserVerification': True,
+					'isUserVerified': True, 'hasPrf': not os.environ.get('WEBAUTHN_NOPRF'), 'automaticPresenceSimulation': True})
+		def passkeys():
+			"""the next button the page shows, clicked"""
+			if not webauthn:
+				return
+			bid = {'go': 'webauthn-go', 'phone': 'webauthn-phone', 'key': 'webauthn-key'}.get(webauthn[0], 'webauthn-cancel')
+			try:
+				r = cdp.js(f"(() => {{ const b = document.getElementById('{bid}'); if (!b || b.disabled) return null; const r = b.getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }})()")
+			except RuntimeError:
+				return
+			if not r:
+				return
+			webauthn.pop(0)
+			cdp.call('Input.dispatchMouseEvent', type='mouseMoved', x=r[0], y=r[1])
+			cdp.call('Input.dispatchMouseEvent', type='mousePressed', x=r[0], y=r[1], button='left', buttons=1, clickCount=1)
+			cdp.call('Input.dispatchMouseEvent', type='mouseReleased', x=r[0], y=r[1], button='left', buttons=0, clickCount=1)
+		if True:	# the machine's page
+			# SEND: typed into #t/eia0 when it has settled (an interactive rc)
+			sends = json.loads(os.environ.get('SEND', '[]'))
+			if sends:
+				wait(cdp, 'window.plan9 && window.plan9.eia0in("") >= 0', 60, 'eia0')
+			seen = 0
+			for line in sends:
+				if isinstance(line, list):	# [text, line]: typed once eia0 has said text since the last one (a prompt)
+					want, line = line
+					end = time.time() + 60
+					while time.time() < end and not any(l.startswith('KERNEL-HALT') for l in cdp.log):
+						o = cdp.js('window.plan9.eia0out()') or ''
+						i = o.find(want, seen)
+						if i >= 0:
+							seen = i + len(want)
+							break
+						passkeys()	# the prompt may come after a passkey's button
+						time.sleep(0.1)
+					cdp.js(f'window.plan9.eia0in({json.dumps(line)})')
+					continue
+				last, since, end = None, time.time(), time.time() + 30
+				while time.time() < end and not any(l.startswith('KERNEL-HALT') for l in cdp.log):
+					try:
+						o = cdp.js('window.plan9.eia0b64()')
+					except RuntimeError:
+						o = None
+					if o != last:
+						last, since = o, time.time()
+					elif o is not None and time.time() - since > 0.6:
+						break
+					time.sleep(0.1)
+				cdp.js(f'window.plan9.eia0in({json.dumps(line)})')
+			if os.environ.get('SENDFILE'):	# bytes, as they are, once eia0 is there
+				wait(cdp, 'window.plan9 && window.plan9.eia0in("") >= 0', 60, 'eia0')
+				time.sleep(1)
+				b = base64.b64encode(open(os.environ['SENDFILE'], 'rb').read()).decode()
+				cdp.js(f'window.plan9.eia0inb64({json.dumps(b)})')
+			# KEYS: typed on the page as a person types (the browser's key events), after it has settled
+			keys = json.loads(os.environ.get('KEYS', '[]'))
+			if keys:
+				last, since, end = None, time.time(), time.time() + 30
+				while time.time() < end:
+					try:
+						o = cdp.js('window.plan9 && window.plan9.eia0b64()')
+					except RuntimeError:
+						o = None
+					if o != last:
+						last, since = o, time.time()
+					elif o and time.time() - since > 1.5:
+						break
+					time.sleep(0.1)
+			# MOUSE: clicks on the kernel's screen, [fx, fy, button] its fractions, once it has said WAITFOR
+			clicks = json.loads(os.environ.get('MOUSE', '[]'))
+			if os.environ.get('EVAL'):	# EVAL=js: run on the page once it has settled (after SEND)
+				time.sleep(1.5)
+				cdp.js(os.environ['EVAL'])
+			if (keys or clicks) and os.environ.get('KEYDELAY'):	# KEYDELAY=s: what to click or type into comes later (rio)
+				time.sleep(float(os.environ['KEYDELAY']))
+			if clicks:
+				want = os.environ.get('WAITFOR', '')
+				end = time.time() + 30
+				while time.time() < end:
+					try:
+						if want in base64.b64decode(cdp.js('window.plan9.eia0b64()') or '').decode(errors='replace'):
+							break
+					except RuntimeError:
+						pass
+					time.sleep(0.2)
+				time.sleep(0.5)
+				for fx, fy, btn in clicks:
+					r = cdp.js("(() => { const b = document.getElementById('screen').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()")
+					x, y = r[0] + fx*r[2], r[1] + fy*r[3]
+					bname = {1: 'left', 2: 'middle', 4: 'right'}[btn]
+					cdp.call('Input.dispatchMouseEvent', type='mouseMoved', x=x, y=y)
+					cdp.call('Input.dispatchMouseEvent', type='mousePressed', x=x, y=y, button=bname, buttons={1: 1, 2: 4, 4: 2}[btn], clickCount=1)	# the DOM's: 1 left, 2 right, 4 middle
+					time.sleep(0.2)
+					cdp.call('Input.dispatchMouseEvent', type='mouseReleased', x=x, y=y, button=bname, buttons=0, clickCount=1)
+					time.sleep(0.3)
+			def quiet(secs):	# eia0 the same for secs: the program has answered
+				last, since, end = None, time.time(), time.time() + 30
+				while time.time() < end:
+					try:
+						o = cdp.js('window.plan9.eia0b64()')
+					except RuntimeError:
+						o = None
+					if o != last:
+						last, since = o, time.time()
+					elif time.time() - since > secs:
+						return
+					time.sleep(0.05)
+			for k in keys:
+				time.sleep(0.05)
+				ev = {'key': k, 'code': k} if len(k) > 1 else {'key': k, 'text': k, 'code': 'Key' + k}
+				cdp.call('Input.dispatchKeyEvent', type='keyDown', **ev)
+				cdp.call('Input.dispatchKeyEvent', type='keyUp', **{x: ev[x] for x in ('key', 'code')})
+				if k == 'Enter':	# what was typed ahead echoes at once: the next line after the answer
+					quiet(0.8)
+			end = time.time() + float(os.environ.get('HALTWAIT', '60'))	# HALTWAIT=s: a long test
+			if os.environ.get('RUNS'):	# RUNS=s: a machine that goes on (rio): look after s
+				end = time.time() + float(os.environ['RUNS'])
+			while time.time() < end and not any(l.startswith('KERNEL-HALT') for l in cdp.log):
+				try:
+					cdp.js('1')
+				except RuntimeError:
+					pass
+				passkeys()
+				time.sleep(0.2)
+			# THEN='[args]': once it has halted, the page loaded again in the same browser
+			# (its origin's storage, OPFS: the machine's disk) with these; EXPECT is the second's
+			if os.environ.get('THEN'):
+				halt = [l for l in cdp.log if l.startswith('KERNEL-HALT')]
+				open(os.path.join(out, f'{name}-first.log'), 'w').write('\n'.join(cdp.log) + '\n')
+				if not halt or 'platform:' in halt[0]:
+					raise SystemExit(f'FAIL: {name}: the first load: {halt or "did not halt"} (build/test/{name}-first.log)')
+				cdp.log.clear()
+				cdp.call('Page.navigate', url=withargs(base, json.loads(os.environ['THEN'])))
+				time.sleep(1)
+				end = time.time() + float(os.environ.get('HALTWAIT', '60'))
+				while time.time() < end and not any(l.startswith('KERNEL-HALT') for l in cdp.log):
+					try:
+						cdp.js('1')
+					except RuntimeError:
+						pass
+					time.sleep(0.2)
+			try:
+				got = base64.b64decode(cdp.js('window.plan9 ? window.plan9.eia0b64() : ""') or '')
+			except RuntimeError:
+				got = b''
+			open(os.path.join(out, f'{name}.txt'), 'wb').write(got)
+			open(os.path.join(out, f'{name}.log'), 'w').write('\n'.join(cdp.log) + '\n')
+			halt = [l for l in cdp.log if l.startswith('KERNEL-HALT')]
+			print(f'wasmapp: {name}: {halt or "did not halt"}')
+			want = open(os.environ['EXPECT'], 'rb').read() if os.environ.get('EXPECT') else None
+			# EXPECTTAIL=1: what it says from the file's first line on (what comes before varies)
+			if want is not None and os.environ.get('EXPECTTAIL'):
+				i = got.find(want.split(b'\n')[0])
+				got = got[i:] if i >= 0 else got
+			if want is not None and os.environ.get('MASKPIDS'):	# "prog pid: msg" (wait, notes): the pid N
+				mask = lambda b: re.sub(rb"([A-Za-z0-9_.]+) [0-9]+: ", rb"\1 N: ", b)
+				got, want = mask(got), mask(want)
+			if want is not None and got != want:
+				sys.stdout.write(got.decode(errors='backslashreplace'))
+				raise SystemExit(f'FAIL: {name}: its eia0 is not {os.environ["EXPECT"]} (build/test/{name}.txt)')
+			if os.environ.get('RUNS'):
+				if halt:
+					raise SystemExit(f'FAIL: {name}: it halted: {halt} (build/test/{name}.log)')
+			elif not halt or 'platform:' in halt[0]:
+				raise SystemExit(f'FAIL: {name}: {halt or "did not halt"} (build/test/{name}.log)')
+			if os.environ.get('EXPECTJS'):	# EXPECTJS=expr: true on the page at the end
+				if not cdp.js(os.environ['EXPECTJS']):
+					raise SystemExit(f'FAIL: {name}: not true on the page: {os.environ["EXPECTJS"]}')
+			if os.environ.get('DRAWS'):	# DRAWS=N: the kernel's screen has N colours at least
+				time.sleep(0.5)
+				png = base64.b64decode(cdp.call('Page.captureScreenshot', format='png')['data'])
+				shot = os.path.join(out, f'{name}.png')
+				open(shot, 'wb').write(png)
+				n, _ = cdp.js(SIG)
+				fl = cdp.js('window.plan9.flushes')
+				print(f'wasmapp: {name}: {fl} flushes, {n} colours, {shot}')
+				if not fl or n < int(os.environ['DRAWS']):
+					raise SystemExit(f'FAIL: {name}: the screen has {n} colours, {fl} flushes ({shot})')
+			print(f'PASS: {name}')
+			return
+	finally:
+		chrome.terminate()
+		srv.terminate()
+		try:
+			chrome.wait(10)
+		except Exception:
+			pass
+		shutil.rmtree(tmp, ignore_errors=True)	# Chromium's profile: 12 MB each, /tmp is small
+
+
+main()

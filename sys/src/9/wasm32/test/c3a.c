@@ -2,7 +2,7 @@
 #include <libc.h>
 
 /*
- * C3a (tools/test-9wasm32): notes - an alarm in a sleep, the handler's
+ * C3a (tools/test/run): notes - an alarm in a sleep, the handler's
  * noted(NCONT) and notejmp, no handler the end; rendezvous with a fork's
  * child; with -f, a fork whose child gets no Worker (the page's failfork)
  */

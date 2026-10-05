@@ -2,7 +2,7 @@
 #include <libc.h>
 
 /*
- * D2 (tools/test-9wasm32): /net over WebSockets - dial the machine's
+ * D2 (tools/test/run): /net over WebSockets - dial the machine's
  * rcpu (webterm /17019): its p9any server speaks first, the ways it
  * authenticates; then the auth server (567) as authdial names it
  * (net!...!ticket: /net/cs), and a port webterm refuses

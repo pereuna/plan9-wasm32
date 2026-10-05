@@ -61,7 +61,15 @@ own; "9front" here means that project.  It is installed and booted as
    harness against it (PAGEURL): echo, rc, init and boot (rio) pass.
 3. The tests here: the browser harness (test-wasmapp, a page server), the
    kernel's and the platform's tests; Plan2001's (accounts, its cloud)
-   stay there.
+   stay there.  2026-10-05: tools/test/run (wasmapp, authsrv: dp9ik,
+   secstore, an rcpu relay; tools/serve with a relay to the gateway), the
+   test programs by mk (sys/src/9/wasm32/test/mkfile, test.proto).  Left
+   with Plan2001: its accounts and login, the app origins' rcpu session
+   (platform.js's /rcpu session code removed here), the installer, the
+   tests against its CPU VM (net, netloop: d2 wants an rcpu server),
+   rcpukeys (its profile: a CPU session uses the terminal's factotum).  The
+   page takes plan9.ini from the server (secstore=, passkeyrp=) in place of
+   Plan2001's /secstore and /login files.
 4. The live image and inst/start for wasm32 (9front's installer: the
    disk's layout, copydist from the distribution disk, bootsetup to esp).
 5. The loader page: boot from the disk's esp, else the live image.

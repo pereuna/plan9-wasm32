@@ -12,7 +12,7 @@
 #include	"screen.h"
 
 /*
- * wasm32's screen (docs/architecture.md, phase C): XRGB32 in the
+ * wasm32's screen (docs/kernel.md): XRGB32 in the
  * kernel's memory; flushmemscreen tells the page which part changed and
  * the page draws it from the shared memory on its canvas (platform.js).
  * The cursor is the page's own (platcursor: the bitmaps), the mouse the
