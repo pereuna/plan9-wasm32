@@ -1,0 +1,32 @@
+#!/bin/bash
+# The tree Plan9-wasm32 is built in: 9front's release (tools/release), its
+# files patched (patches/9front/*.diff, patch -p1 from the root; each
+# must apply to the release as it is) and this tree's files over it - new
+# files, and the patched files again, which must be the same.  9front's
+# root layout: /sys, /rc, /$objtype ... as a 9front machine's /.  Only
+# git's files of this tree; the tree made anew.
+#   tools/tree [DIR]	default build/tree
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
+out=${1:-$root/build/tree}
+rel=$("$here/release")
+rm -rf "$out"; mkdir -p "$out"
+cp -a "$rel/." "$out/"
+rm -f "$out"/.9front-*
+for p in "$root"/patches/9front/*.diff; do
+	patch -s -p1 -d "$out" <"$p" || { echo "tree: $(basename "$p") does not apply to the release" >&2; exit 1; }
+done
+files=$(cd "$root" && git ls-files | grep -v -e '^patches/' -e '^tools/' -e '^docs/' -e '^third_party/' -e '^README' -e '^\.git')
+for p in "$root"/patches/9front/*.diff; do
+	for f in $(sed -n 's|^+++ b/\([^	 ]*\).*|\1|p' "$p"); do
+		cmp -s "$out/$f" "$root/$f" || { echo "tree: $f is not $(basename "$p") applied to the release's" >&2; exit 1; }
+	done
+done
+(cd "$root" && echo "$files" | cpio -pdmu --quiet "$out")
+# what the release ships made from another file (libsec's X.c and
+# libauthsrv's X.mpc from X.mp, by mpc) newer than it, as on a 9front
+# machine: mk would make it again with a tool the host lacks
+find "$out" -name '*.mp' | while read -r m; do
+	for g in "${m%.mp}.c" "${m}c"; do [ ! -e "$g" ] || touch "$g"; done
+done
+echo "tree: $out ($(ls "$root"/patches/9front/*.diff | wc -l) patches, $(echo "$files" | wc -l) files)"

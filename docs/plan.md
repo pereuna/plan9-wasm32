@@ -55,7 +55,10 @@ own; "9front" here means that project.  It is installed and booted as
    9front's, booted from its esp after a reload), not yet in this tree's.
 2. The build here: fetch the release, lay the tree over it, 3c/3l for the
    host, the native build (from Plan2001's tools/9front-2001,
-   native-wasm32, dist-wasm32); the kernel and bootfs.
+   native-wasm32, dist-wasm32); the kernel and bootfs.  Done 2026-10-05:
+   tools/build (release, tree, hostcc, native, bootfs: sys/src/9/wasm32/
+   bootfs.proto) makes build/live; tools/serve serves it.  Plan2001's
+   harness against it (PAGEURL): echo, rc, init and boot (rio) pass.
 3. The tests here: the browser harness (test-wasmapp, a page server), the
    kernel's and the platform's tests; Plan2001's (accounts, its cloud)
    stay there.

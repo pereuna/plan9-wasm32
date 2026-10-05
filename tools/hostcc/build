@@ -1,0 +1,59 @@
+#!/bin/bash
+# 3c, 3l and 3a for the host (Linux), to build Plan9-wasm32 natively
+# (tools/native): this tree's back ends (sys/src/cmd/3c, 3l, 3a) on 9front's
+# front end and libbio (the release's sys/src/cmd/cc, sys/src/libbio; cc.y
+# by plan9port's yacc), on POSIX through tools/hostcc (u.h, libc.h, bio.h,
+# the few system calls, 9front's qsort; posixproc.c: cc -p runs $CPP) and
+# drawterm's portable libc (third_party/drawterm: fmt, utf, print).
+# libbio's bvprint.c is tools/hostcc's: va_copy, a va_list may be an array.
+#   PLAN9=... tools/hostcc/build [3c 3l 3a]	into build/host/bin
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
+[ -x "${PLAN9:-}/bin/yacc" ] || { echo "hostcc: PLAN9 must name a plan9port with yacc" >&2; exit 2; }
+rel=$("$root/tools/release")
+dt=$root/third_party/drawterm
+out=$root/build/host
+CC=${CC:-gcc}
+mkdir -p "$out/bin" "$out/cc"
+# cc's grammar, once
+if [ ! -s "$out/cc/y.tab.c" ] || [ "$rel/sys/src/cmd/cc/cc.y" -nt "$out/cc/y.tab.c" ]; then
+	(cd "$out/cc" && cp "$rel/sys/src/cmd/cc/cc.y" . && "$PLAN9/bin/yacc" -d cc.y >/dev/null)
+fi
+CFLAGS="-O2 -std=gnu17 -w -fno-strict-aliasing -fwrapv -Dlinux -DCCPROC -I$here -I$dt/include -I$dt -I$rel/sys/src/cmd/cc -I$out/cc"
+common=()
+for f in $(ls "$rel"/sys/src/libbio/*.c | grep -v -e btestprint -e bvprint); do common+=("$f"); done
+common+=("$here/bvprint.c" "$here/compat.c" "$here/p9.c" "$here/qsort.c" "$here/posixproc.c")
+for f in "$dt"/libc/*.c; do	# drawterm's libc: what builds on POSIX (the rest is for its kernel)
+	case $(basename "$f") in
+	crypt.c|dial.c|pushssl.c|pushtls.c|netmkaddr.c|read9pmsg.c|dirstat.c|dirfstat.c|dirwstat.c|dirfwstat.c|getenv.c|time.c|nsec.c|truerand.c|lock.c|atexit.c|sysfatal.c|fmtlock.c|\
+	lrand.c|rand.c|nrand.c|lnrand.c|frand.c|runestrdup.c|runestrcat.c) ;;
+	*) common+=("$f") ;;
+	esac
+done
+for t in ${*:-3c 3l 3a}; do
+	be=$root/sys/src/cmd/$t
+	case $t in
+	3c)	srcs=("$out/cc/y.tab.c"); for f in lex mac dcl acid pickle bits com scon funct sub com64 dpchk pgen pswt; do srcs+=("$rel/sys/src/cmd/cc/$f.c"); done
+		for f in cgen enam list sgen swt txt machcap; do srcs+=("$be/$f.c"); done ;;
+	3l)	srcs=("$be/obj.c" "$be/wasm.c") ;;
+	3a)	srcs=("$be/3a.c") ;;
+	*)	echo "hostcc: $t?" >&2; exit 2 ;;
+	esac
+	mkdir -p "$out/o/$t"
+	objs=()
+	fail=0
+	for s in "${srcs[@]}" "${common[@]}"; do
+		case $s in
+		$dt/libc/*) o=$out/o/$t/libc-$(basename "${s%.c}").o; inc= ;;
+		$be/*) o=$out/o/$t/be-$(basename "${s%.c}").o; inc=-I$be ;;
+		*) o=$out/o/$t/$(basename "${s%.c}").o; inc=-I$be ;;
+		esac
+		if [ ! -e "$o" ] || [ "$s" -nt "$o" ]; then
+			$CC $CFLAGS $inc -c "$s" -o "$o" 2>"$o.err" || { echo "hostcc: $s:"; head -5 "$o.err"; fail=1; }
+		fi
+		objs+=("$o")
+	done
+	[ $fail = 0 ] || exit 1
+	$CC -o "$out/bin/$t" "${objs[@]}" -lm
+done
+echo "hostcc: $out/bin: $(ls "$out/bin" | tr '\n' ' ')"

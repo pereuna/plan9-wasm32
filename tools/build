@@ -1,0 +1,25 @@
+#!/bin/bash
+# Plan9-wasm32 from 9front's release: the tree (tools/tree), built natively
+# (tools/native: the libraries, the kernel, the boot file system's
+# programs), the boot file system (tools/bootfs), and the live image in
+# build/live - the page as the browser gets it from the server: its
+# firmware (kernel.html as index.html, its version in it; platform.js),
+# the kernel (9wasm32.wasm) and the boot file system (w3root.fs), each
+# also gzipped (a server sends FILE.gz to a browser that takes it).
+#   PLAN9=... tools/build
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
+tree=$root/build/tree
+"$here/tree" "$tree"
+TREE=$tree "$here/native" >"$root/build/native.log" 2>&1 || { tail -20 "$root/build/native.log"; echo "build: tools/native failed (build/native.log)" >&2; exit 1; }
+"$here/bootfs" "$tree" "$tree/sys/src/9/wasm32/bootfs.proto" "$root/build/root.fs"
+live=$root/build/live
+w=$tree/sys/src/9/wasm32
+rm -rf "$live"; mkdir -p "$live"
+# its version in it (the commit, dirty if the tree is, and when it was made): a cached page shows
+v="$(git -C "$root" describe --always --dirty 2>/dev/null || echo unknown) $(date -u +%Y-%m-%dT%H:%MZ)"
+sed "s|@VERSION@|$v|" "$w/kernel.html" >"$live/index.html"
+cp "$w/platform.js" "$tree/wasm32/9wasm32.wasm" "$live/"
+cp "$root/build/root.fs" "$live/w3root.fs"
+for f in "$live"/*; do gzip -9 -n -k "$f"; done
+echo "build: $live: $(cd "$live" && ls | grep -v '\.gz$' | tr '\n' ' ')"

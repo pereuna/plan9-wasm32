@@ -1,0 +1,28 @@
+#!/bin/bash
+# 9front's release this tree builds from (tools/release.conf: its name and
+# the checksums of its ISO), unpacked into build/release: fetched into the
+# cache if it is not there (~/.cache/plan9-wasm32, or $PLAN9WASM32_CACHE;
+# Plan2001's cache has the same ISO), checked, unpacked once.
+#   tools/release        prints the release's directory
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
+. "$here/release.conf"
+cache=${PLAN9WASM32_CACHE:-$HOME/.cache/plan9-wasm32}
+out=$root/build/release
+mkdir -p "$cache"
+iso=$cache/$ISO
+[ -e "$iso" ] || [ ! -e "$HOME/.cache/plan2001/$ISO" ] || ln -s "$HOME/.cache/plan2001/$ISO" "$iso"
+if [ ! -e "$iso" ]; then
+	echo "release: fetching $URL" >&2
+	curl -fL -o "$iso.gz.part" "$URL"
+	echo "$ISO_GZ_SHA256  $iso.gz.part" | sha256sum -c --quiet - || { echo "release: $URL: not the release's checksum" >&2; exit 1; }
+	gunzip -c "$iso.gz.part" >"$iso.part" && mv "$iso.part" "$iso" && rm -f "$iso.gz.part"
+fi
+if [ ! -e "$out/.$NAME" ]; then
+	echo "$ISO_SHA256  $iso" | sha256sum -c --quiet - || { echo "release: $iso is not $NAME's" >&2; exit 1; }
+	rm -rf "$out"; mkdir -p "$out"
+	7z x -y -o"$out" "$iso" >/dev/null
+	rm -rf "$out/[BOOT]"
+	touch "$out/.$NAME"
+fi
+echo "$out"

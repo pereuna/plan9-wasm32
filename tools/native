@@ -1,0 +1,135 @@
+#!/bin/bash
+# Plan9-wasm32 built natively, with 9front's own mkfiles, as objtype=wasm32
+# mk on a 9front machine builds it - here on Linux: the tree (tools/tree)
+# as / in a mount namespace of its own (bwrap: its /sys and every /$objtype,
+# the host's other directories; no root needed), plan9port's mk, rc and
+# yacc ($PLAN9), the host's 3c and 3l (tools/hostcc), and an ar that takes
+# Plan 9's "ar vu".  What it builds goes to the tree's /wasm32 (lib, bin)
+# and /sys/src/9/wasm32.  DIRs that need others' libraries need those DIRs
+# before them.
+#   PLAN9=... tools/native [DIR[:TARGET,...]...]
+#        DIRs under /sys/src, in order, each mk install or mk TARGETs
+#        (default: the libraries, the kernel, the boot file system's programs)
+#   TREE=dir: a tree already made, else build/tree made anew; MKFLAGS: mk's (-k)
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
+[ -x "${PLAN9:-}/bin/mk" ] && [ -x "$PLAN9/bin/rc" ] || { echo "native: PLAN9 must name a plan9port with mk and rc" >&2; exit 2; }
+tree=${TREE:-$root/build/tree}
+[ -n "${TREE:-}" ] || "$here/tree" "$tree" >/dev/null
+tree=$(cd "$tree" && pwd)
+"$here/hostcc/build" 3c 3l >/dev/null
+bin=$root/build/host/bin
+mkdir -p "$bin" "$tree/wasm32/lib" "$tree/wasm32/bin"
+cat >"$bin/ar" <<'X'
+#!/bin/sh
+# Plan 9's ar: its key may be implied (mksyslib's "ar vu LIB FILES": r)
+k=$1; shift
+case $k in *[dmpqrtx]*) ;; *) k=r$k ;; esac
+exec /usr/bin/ar "$k" "$@"
+X
+chmod 775 "$bin/ar"
+rm -f "$bin/mk" "$bin/rc.mk"
+# mpc (libsec's and libauthsrv's X.mp to C), a program for the host: the
+# release ships some of its output unmade; built here with plan9port from
+# the tree's mpc.y
+if [ -e "$tree/sys/src/cmd/mpc.y" ] && [ ! -x "$bin/mpc" ]; then
+	m=$(mktemp -d)
+	(cd "$m" && cp "$tree/sys/src/cmd/mpc.y" . && PATH=$PLAN9/bin:$PATH "$PLAN9/bin/yacc" -d mpc.y >/dev/null &&
+		PATH=$PLAN9/bin:$PATH 9c y.tab.c && PATH=$PLAN9/bin:$PATH 9l -o "$bin/mpc" y.tab.o) || { echo "native: mpc" >&2; exit 1; }
+	rm -rf "$m"
+fi
+# cpp, for cc -p (3c runs $CPP): 9front's, built for the host with plan9port's lib9
+if [ -e "$tree/sys/src/cmd/cpp/cpp.c" ] && [ ! -x "$bin/cpp" ]; then
+	m=$(mktemp -d)
+	cp "$tree"/sys/src/cmd/cpp/*.[ch] "$m/"
+	sed -i 's/^extern[ \t]*int getopt(int, char \*\*, char \*);//' "$m/nlist.c"	# POSIX's getopt is declared already
+	gcc -O2 -w -fcommon -Wno-int-conversion -I"$PLAN9/include" -o "$bin/cpp" "$m"/*.c -L"$PLAN9/lib" -l9 ||
+		{ echo "native: cpp" >&2; exit 1; }
+	rm -rf "$m"
+fi
+# aux/kbdfs's latin1.h, made from /lib/keyboard by mklatin, a program for
+# the host: the release does not ship it; made here with plan9port
+k=$tree/sys/src/cmd/aux/kbdfs
+if [ -e "$k/mklatin.c" ] && [ ! -e "$k/latin1.h" ]; then
+	m=$(mktemp -d)
+	(cd "$m" && PATH=$PLAN9/bin:$PATH 9c "$k/mklatin.c" && PATH=$PLAN9/bin:$PATH 9l -o mklatin mklatin.o &&
+		./mklatin "$tree/lib/keyboard" >"$k/latin1.h") || { echo "native: latin1.h" >&2; rm -f "$k/latin1.h"; exit 1; }
+	rm -rf "$m"
+fi
+# what the kernel and the boot file system's programs need, in order, and
+# those programs (sys/src/9/wasm32/bootfs.proto)
+libs="libc libthread libmp libsec libbio libregexp libString libauth libauthsrv lib9p libip libndb libdraw libmemdraw libmemlayer libframe libcomplete libplumb libcontrol libflate libdisk"
+one="basename cat cleanname cp date echo ls mkdir mv rm sleep sort touch wc xd bind unmount ns sed mount pwd ps read test chmod tlsclient mntgen ramfs tar stats webcookies"
+cmds="cmd/rc cmd/hjfs cmd/rio cmd/aux/kbdfs cmd/auth/factotum cmd/auth/secstore:secstore.install,aescbc.install cmd/aux/seckeys cmd/exportfs cmd/plumb cmd/disk/prep cmd/disk:format.install,mkfs.install,mkext.install cmd/dossrv cmd/gzip:gunzip.install cmd/webfs cmd:$(echo $one | sed 's/\([^ ]*\)/\1.install/g; s/ /,/g')"
+dirs=${*:-$libs 9/wasm32 $cmds}
+# /lib/ucd: libc/ucd's tables are made from it, but they come made (its *data
+# files); stand-ins older than the tables.  aux/kbdfs's latin1.h, made from
+# /lib/keyboard by mklatin, a program for the host ($cputype): it comes made
+# too; a stand-in /lib/keyboard as old (below, a stand-in mklatin)
+ucd=$(mktemp -d)
+trap 'rm -rf "$ucd"' EXIT
+for f in CompositionExclusions DerivedNormalizationProps GraphemeBreakProperty UnicodeData WordBreakProperty emoji-data; do
+	touch -d 1980-01-01 "$ucd/$f.txt"	# not 0: mk takes that as no file
+done
+touch -d 1980-01-01 "$ucd/keyboard"
+# the tree's 9front root in a mount namespace of the build's own: with bwrap
+# a root of its own (the host's directories, the tree's /sys and every
+# /$objtype it has: libmach includes /arm/include/ureg.h ...), no root
+# needed; else unshare, which needs /wasm32 made by root
+if command -v bwrap >/dev/null; then
+	wrap=(bwrap --dev /dev --proc /proc --tmpfs /tmp)
+	for d in /*; do
+		n=${d#/}
+		case $n in sys|proc|dev|tmp|lost+found) continue ;; esac
+		[ -e "$tree/$n" ] && [ -d "$tree/$n" ] && [ ! -e "/$n" ] && continue	# the tree's, below
+		if [ -L "$d" ]; then wrap+=(--symlink "$(readlink "$d")" "$d"); elif [ -d "$d" ]; then wrap+=(--bind "$d" "$d"); fi
+	done
+	wrap+=(--bind "$tree/sys" /sys --bind "$ucd" "$ucd")
+	for d in "$tree"/*; do
+		n=$(basename "$d")
+		case $n in sys|lib|rc|usr|adm|tmp|mnt|n|dev|env|proc|fd|srv|net|bin) continue ;; esac
+		[ -d "$d/include" ] || [ -d "$d/bin" ] || [ -d "$d/lib" ] || continue	# an /$objtype
+		[ -e "/$n" ] && [ ! -L "/$n" ] && [ "$n" != wasm32 ] && continue
+		wrap+=(--bind "$d" "/$n")
+	done
+	[ -e /lib/ucd ] && wrap+=(--bind "$ucd" /lib/ucd)
+	[ -e /lib/keyboard ] && wrap+=(--bind "$ucd/keyboard" /lib/keyboard)
+else
+	wrap=(unshare $( [ "$(id -u)" = 0 ] || echo -r ) -m --propagation private)
+fi
+"${wrap[@]}" bash -s "$tree" "$bin" "$PLAN9" "$ucd" $dirs <<'X'
+set -e
+tree=$1 bin=$2 P9=$3 ucd=$4; shift 4
+if [ ! -d /sys/src ]; then	# unshare: the mounts here
+	/usr/bin/mount --bind "$tree/sys" /sys
+	/usr/bin/mount --bind "$tree/wasm32" /wasm32
+	/usr/bin/mount --bind "$ucd" /lib/ucd
+	/usr/bin/mount --bind "$ucd/keyboard" /lib/keyboard
+fi
+k=/sys/src/cmd/aux/kbdfs
+if [ -e $k/latin1.h ]; then
+	: >$k/mklatin.amd64; touch -d '+1 min' $k/latin1.h
+fi
+# awk's proctab.c (made by maketab, a program for the host) and awkgram.c, y.tab.h (yacc's): they
+# come made too; a stand-in maketab newer than its inputs, the made files newer than both
+a=/sys/src/cmd/awk
+if [ -e $a/proctab.c ]; then
+	touch -d '-3 min' $a/awkgram.y $a/maketab.c
+	touch -d '-2 min' $a/y.tab.h $a/awkgram.c
+	: >$a/amd64.maketab; touch -d '-1 min' $a/amd64.maketab
+	touch $a/proctab.c
+fi
+export CPP=$bin/cpp PATH=$bin:$P9/bin:$PATH PLAN9=$P9 objtype=wasm32 cputype=amd64 FORCERCFORMK=1	# FORCERCFORMK: plan9port's mk runs recipes in rc, as 9front's mkfiles are written
+for d in "$@"; do
+	t=install
+	case $d in *:*) t=${d#*:} t=${t//,/ } d=${d%%:*} ;; esac
+	echo "native: /sys/src/$d: mk $t"
+	mkdir -p /wasm32/bin/aux /wasm32/bin/auth /wasm32/bin/games /wasm32/bin/ip /wasm32/bin/disk /wasm32/bin/ndb /wasm32/bin/fs
+	# /$objtype/bin's directories as 9front has them for amd64 (venti, upas, replica ...), and acme's
+	[ ! -d /amd64/bin ] || (cd /amd64/bin && find . -mindepth 1 -type d) | while read -r b; do mkdir -p "/wasm32/bin/$b"; done
+	[ ! -d /acme/bin ] || mkdir -p /acme/bin/wasm32
+	cd "/sys/src/$d" || { echo "native: no /sys/src/$d" >&2; exit 1; }
+	mk ${MKFLAGS:-} $t
+done
+X
+echo "native: ok"
