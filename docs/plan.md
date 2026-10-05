@@ -47,7 +47,12 @@ own; "9front" here means that project.  It is installed and booted as
 ## Steps
 
 1. The import from Plan2001 (done): the port, #ω, init without
-   Plan2001's login and app origins.
+   Plan2001's login and app origins.  It has Plan2001's work in progress
+   on the disk too: partitions on #S/sdW0 (part, delpart: devsdw.c),
+   /boot/disk reading the GPT and prep tables (diskparts) and hjfs on fs,
+   and platform.js's diskboot (GPT, esp's FAT with VFAT names: the kernel,
+   bootfs, plan9.ini) - tried in Plan2001's tests (a disk laid out as
+   9front's, booted from its esp after a reload), not yet in this tree's.
 2. The build here: fetch the release, lay the tree over it, 3c/3l for the
    host, the native build (from Plan2001's tools/9front-2001,
    native-wasm32, dist-wasm32); the kernel and bootfs.
