@@ -5,7 +5,12 @@
  *	memory	[0, GUARD) nothing, [GUARD, stacktop) the stack, then data,
  *		bss, end; the heap from end (brk grows the memory)
  *	globals	SP, RET.w RET.v RET.f RET.d
- *	table	function pointers: index 1 on (0 is nil)
+ *	table	the functions: index 1 on.  A function's address, the value of
+ *		a pointer to it, is TEXTBASE plus its index (0 is nil), as a
+ *		text segment's address is on the other machines: never a
+ *		small number nor data's address - programs tell them apart
+ *		(rc's code: a union of function pointers, ints and strings,
+ *		whose functions it compares).  call_indirect takes the base off
  *	import	plan9.syscall(number i32, args i32) -> i64
  *	tag	0, longjmp's (buf, v): a function calling setjmp catches it
  *	export	memory, sp, _start (calls the entry: -E, default _main; the
@@ -25,6 +30,9 @@ enum
 
 	MAXPAGES = 16384,	/* -k: a shared memory has a maximum: 1 GB */
 };
+
+/* a function's address: TEXTBASE + its table index; an i32, sign-extended as the host's long holds it */
+#define	TEXTBASE	((long)(int)0xF0000000)
 
 static	int	nimport = 1;	/* plan9.syscall, then -k's platform functions */
 static	Sym**	imports;
@@ -416,7 +424,7 @@ symaddr(Sym *s)
 	switch(s->type) {
 	case STEXT:
 	case SSYNTH:
-		return s->tab;
+		return TEXTBASE + s->tab;
 	case SDATA:
 	case SBSS:
 		return s->value;
@@ -996,6 +1004,8 @@ eprog(Prog *p)
 			break;
 		}
 		push(&p->to, Kw);
+		iconst(TEXTBASE);
+		op(0x6b);	/* i32.sub: the table index */
 		op2(0x11, 0);	/* call_indirect type 0 */
 		buleb(&code, 0);	/* table 0 */
 		if(unwind)

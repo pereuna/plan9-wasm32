@@ -1,0 +1,6 @@
+x=`{echo}
+if(~ $#x 0 || ~ $x ''){
+	x=cirno
+	echo -n $x >/dev/null
+}
+echo ran to the end

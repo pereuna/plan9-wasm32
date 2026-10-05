@@ -27,7 +27,17 @@ On Linux, with gcc, Python 3, 7z, bwrap and plan9port (mk, rc, yacc):
 - `tools/native` builds the tree with 9front's mkfiles.
 - `tools/bootfs` makes the boot file system.
 
-The live image is put in `build/live`.
+`build/live` gets the page, the kernel and its boot file system: the
+machine with the boot file system alone.
+
+The distribution and its live image, as 9front's ISO, the whole release
+built for wasm32 (`docs/install.md`):
+
+    PLAN9=$HOME/plan9port tools/dist
+    tools/serve -d build/dist/live     # then inst/start in it
+
+`?iso=file` on the page boots a copy of the ISO on your own computer
+instead of the server's.
 
 Status and plan: docs/plan.md.
 

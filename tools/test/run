@@ -36,7 +36,7 @@ if [ -z "${NOBUILD:-}" ]; then
 fi
 rm -rf "$site"; mkdir -p "$site"
 cp "$root/build/live/index.html" "$root/build/live/platform.js" "$root/build/live/9wasm32.wasm" "$site/"
-"$root/tools/bootfs" "$tree" "$site/w3root.fs" "$tree/sys/src/9/wasm32/bootfs.proto" "$tree/sys/src/9/wasm32/test/test.proto" >/dev/null
+"$root/tools/bootfs" "$tree" "$site/9wasm32.fs" "$tree/sys/src/9/wasm32/bootfs.proto" "$tree/sys/src/9/wasm32/test/test.proto" >/dev/null
 # what an interrupted run left (tools/serve, authsrv on these ports)
 for p in 18092 18093 18099; do
 	if (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then
@@ -69,6 +69,9 @@ want long $names && run long "[\"/bin/echo\", \"$(printf '%06000d' 0 | tr 0 a)\"
 want fork $names && run fork '["/bin/fork"]'
 want forkloop $names && HALTWAIT=400 run forkloop '["/bin/forkloop", "2000"]'
 want rc $names && run rc '["/bin/rc", "-c", "echo hello from rc; x=(a b c); echo $#x; ls /bin/echo /bin/rc | wc -l; cat /rc/lib/rcmain | wc -l; echo done"]'
+# rc's compiled code is a union of function pointers, ints and strings, and rc tells them apart by the
+# functions' addresses: a function's address never a small number (3l: TEXTBASE), or rc misreads its code
+want rcif $names && run rcif '["/bin/rc", "-c", "rc /bin/rcif.rc; echo done"]'
 want rci $names && run rci '["/bin/rc", "-i"]' '["echo hi\n", "ls /bin/echo /bin/rc | wc -l\n", "x=`{echo a b}; echo $#x\n", "cat nonexistent\n", "exit\n"]'
 want c3a $names && run c3a '["/bin/c3a"]'
 want failfork $names && run failfork '["/bin/c3a", "-f"]' '[]' '&failfork=1'
@@ -78,7 +81,7 @@ want preempt $names && run preempt '["/bin/preempt"]'
 want rfmemloop $names && HALTWAIT=200 run rfmemloop '["/bin/rc", "-c", "for(i in 1 2 3 4 5 6 7 8 9 10) { threads >/dev/null; rfmem >/dev/null; preempt >/dev/null }; echo ten rounds; threads | echo the pipe closed; ~ $status *'"'"'write on closed pipe'"'"'* && echo threads ended by its note"]'
 want failhelper $names && run failhelper '["/bin/c3b"]' '[]' '&failhelper=1'
 want failrfmem $names && run failrfmem '["/bin/c3b"]' '[]' '&failrfmem=1'
-want init $names && run init '["/bin/rc", "/boot/console"]' '["echo hi\n", "echo äåö | wc -c\n", "sleep 100\n", "\u007f", "echo after the interrupt\n", "exit\n"]'
+want init $names && run init '["/bin/rc", "/boot/console"]' '[["% ", "echo hi\n"], "echo äåö | wc -c\n", "sleep 100\n", "\u007f", "echo after the interrupt\n", "exit\n"]'
 want clock $names && DRAWS=3 run clock '["/bin/rc", "-c", "aux/kbdfs -q -s cons /dev/eia0; clock & sleep 4; echo drawn"]'
 want keys $names && KEYS='["e", "c", "h", "o", " ", "ä", "å", "ö", " ", "$", "s", "y", "s", "n", "a", "m", "e", "Enter", "e", "x", "i", "t", "Enter"]' run keys '["/bin/rc", "/boot/console"]'
 want mouse $names && WAITFOR=ready MOUSE='[[0.75, 0.5, 4]]' EXPECTJS="document.getElementById('screen').style.cursor.startsWith('url(')" run mouse '["/bin/c3d"]'

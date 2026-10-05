@@ -17,7 +17,7 @@ PORTFILES=alarm alloc allocb auth chan dev devcons devdraw devdup devenv\
 	pgrp portclock print qio qlock sysfile taslock tod xalloc\
 	bootargs bootinfo
 
-ARCHFILES=arch bootarch cache clock devkbd devproc devrootfs devsdw devtab devwebauthn\
+ARCHFILES=arch bootarch cache clock devkbd devproc devrootfs devsdw devswap devtab devwebauthn\
 	devwsnet main proc screen sysproc trap uartwasm32
 
 OBJ=${PORTFILES:%=%.$O} ${ARCHFILES:%=%.$O}

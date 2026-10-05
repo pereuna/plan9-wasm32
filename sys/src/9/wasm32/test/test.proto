@@ -19,3 +19,4 @@ bin
 	bytes	- sys sys /sys/src/9/wasm32/test/3.bytes
 	preempt	- sys sys /sys/src/9/wasm32/test/3.preempt
 	clock	- sys sys /wasm32/bin/clock
+	rcif.rc	- sys sys /sys/src/9/wasm32/test/rcif.rc

@@ -1,6 +1,7 @@
 # the wasm32 machine's boot file system (#R: the page gives it with the
 # kernel, as 9front's kernel has its bootfs.paq): what init, /boot/disk and
-# /boot/secstore run, rc, rio and glenda's terminal (her profile's
+# /boot/secstore run - the file servers a root can be (9660srv, hjfs,
+# gefs, cwfs64x, dossrv) and fstype - rc, rio and glenda's terminal (her profile's
 # webcookies and webfs, riostart's stats; rcpu).  rc's rcmain is its source's:
 # the release's /rc/lib/rcmain is older than its rc.  disk/mkfs's form:
 # name, mode, owner, group, and the file it is (from the tree's root; -
@@ -16,6 +17,7 @@ boot
 	secstore	- sys sys /sys/src/9/wasm32/secstore
 	factotum	- sys sys /wasm32/bin/auth/factotum
 bin	- sys sys /wasm32/bin
+	9660srv
 	basename
 	bind
 	cat
@@ -23,9 +25,12 @@ bin	- sys sys /wasm32/bin
 	cleanname
 	cp
 	date
+	dd
 	dossrv
+	cwfs64x
 	echo
 	exportfs
+	gefs
 	gunzip
 	hjfs
 	ls
@@ -76,6 +81,7 @@ lib
 				+
 rc
 	bin
+		fstype
 		rconnect
 		rcpu
 		window

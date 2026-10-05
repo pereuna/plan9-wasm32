@@ -63,3 +63,5 @@ void	setconfenv(void);
 /* bootarch.c: wasm32's side of port/bootinfo.c */
 void*	bootearlymap(uvlong, uvlong);
 void	halt(void);
+/* devsdw.c */
+void	sdwflushall(void);

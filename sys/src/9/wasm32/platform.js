@@ -39,15 +39,17 @@ function initconf(args) {
 
 /*
  * front: its config (plan9.ini lines), args (init=), fs (the root's
- * archive), screen ({ w, h }); disksize, the disk's bytes if there is one:
- * the machine's memory, the blob in it - { mem, pa (the blob's address),
- * fb ({ addr, stride, w, h }, or null), regs (the disk's registers, or 0) }
+ * archive), screen ({ w, h }); disks, sdW0, sdW1 ...: { size, ro } or
+ * null: the machine's memory, the blob in it - { mem, pa (the blob's
+ * address), fb ({ addr, stride, w, h }, or null), regs (each disk's
+ * registers, or 0) }
  */
-function firmware(front, disksize) {
+function firmware(front, disks = []) {
 	const heap = PAGES * 65536;
-	/* the disk's registers (devsdw.c): a page above the heap, Reserved, as *sdW0= says */
-	const regs = disksize ? heap : 0;
-	const diskconf = regs ? '*sdW0=0x' + regs.toString(16) + ' ' + disksize + '\n' : '';
+	/* each disk's registers (devsdw.c): a page above the heap, Reserved, as *sdWn= says */
+	let next = heap;
+	const regs = disks.map((d) => d ? (next += BI.pg) - BI.pg : 0);
+	const diskconf = disks.map((d, i) => d ? '*sdW' + i + '=0x' + regs[i].toString(16) + ' ' + d.size + (d.ro ? ' ro' : '') + '\n' : '').join('');
 	/* the firmware's own device lines last: plan9.ini's later line wins (bootargs.c), and these are not the page's to change */
 	const config = new TextEncoder().encode(initconf(front.args) + (front.config ?? '') + diskconf + '\0');
 	const rd = front.fs ?? null;
@@ -56,10 +58,10 @@ function firmware(front, disksize) {
 	const fbbytes = fbw > 0 && fbh > 0 ? fbw * fbh * 4 : 0;
 
 	/* the blob: header, config, memory map (nmap entries at most) */
-	const nmap = 5;
+	const nmap = 4 + disks.length;
 	const configoff = 256, mmapoff = configoff + Math.ceil(config.length / 8) * 8;
 	const blobsize = pground(mmapoff + nmap * BI.memsize);
-	const pa = heap + (regs ? BI.pg : 0);
+	const pa = next;
 	const rdbase = rd && rd.length ? pa + blobsize : 0;
 	const fbbase = fbbytes ? pground(pa + blobsize + (rd ? rd.length : 0)) : 0;
 	const top = fbbase ? fbbase + pground(fbbytes) : pground(pa + blobsize + (rd ? rd.length : 0));
@@ -68,7 +70,7 @@ function firmware(front, disksize) {
 	const mem = new WebAssembly.Memory({ initial: pages, maximum: MAXPAGES, shared: true });
 
 	const map = [[0, heap, BootMemConventional]];
-	if (regs) map.push([regs, BI.pg, BootMemReserved]);
+	for (const r of regs) if (r) map.push([r, BI.pg, BootMemReserved]);
 	map.push([pa, blobsize, BootMemLoaderData]);
 	if (rdbase) map.push([rdbase, pground(rd.length), BootMemLoaderData]);
 	if (fbbase) map.push([fbbase, pground(fbbytes), BootMemReserved]);
@@ -115,6 +117,9 @@ function firmware(front, disksize) {
 // exec's: the program's frames unwind to platuser's loop, which starts the next
 const EXEC = { exec: true };
 // noted's: the program's notify handler's frames unwind to its caller (unote)
+/* a function's address (3l): TEXTBASE + its index in the module's table, as a text segment's - never a small number */
+const TEXTBASE = 0xF0000000;
+const fidx = (p) => (p >>> 0) - TEXTBASE;
 const NOTED = { noted: true };
 // a program's fault: it ends with the note, as a trap would on Plan 9 - the machine goes on
 class Trap extends Error {}
@@ -124,7 +129,7 @@ function kcall(env, fn, ...w) {
 	const x = env.x, k = x.sp.value, top = (k - 8 - 4*w.length) & ~7, d = new DataView(env.mem.buffer);
 	w.forEach((v, i) => d.setUint32(top + 4*i, v, true));
 	x.sp.value = top;
-	x.table.get(fn)();
+	x.table.get(fidx(fn))();
 	x.sp.value = k;
 }
 
@@ -155,15 +160,15 @@ function unote(env) {
 	d.setUint32(top, ureg, true);
 	d.setUint32(top + 4, msg, true);
 	x.sp.value = top;
-	if (!(nt.handler > 0 && nt.handler < x.table.length)) {
+	if (!(fidx(nt.handler) > 0 && fidx(nt.handler) < x.table.length)) {
 		/* not a function of this program's: as if it had no handler */
-		console.log(`KLOG platform: a note's handler ${nt.handler} is not in this program (table ${x.table.length}): ${new TextDecoder().decode(nt.msg)}`);
+		console.log(`KLOG platform: a note's handler 0x${(nt.handler >>> 0).toString(16)} is not in this program (table ${x.table.length}): ${new TextDecoder().decode(nt.msg)}`);
 		x.sp.value = sp;
 		kcall(env, nt.done, nt.p);
 		throw new Trap(new TextDecoder().decode(nt.msg));
 	}
 	try {
-		x.table.get(nt.handler)();
+		x.table.get(fidx(nt.handler))();
 	} catch (e) {
 		if (e !== NOTED) {
 			kcall(env, nt.done, nt.p);
@@ -340,12 +345,12 @@ function runprog(env, K, host, pid, job) {
 			m32().setUint32(sp, t.arg, true);
 			x.sp.value = sp;
 			x.asptr.value = t.base;
-			return tbl.get(t.fn);
+			return tbl.get(fidx(t.fn));
 		}
 		x.asptr.value = t.asptr;
 		x.asstate.value = 2;
 		x.asret.value = c.ret;
-		return t.fn ? tbl.get(t.fn) : x._start;
+		return t.fn ? tbl.get(fidx(t.fn)) : x._start;
 	};
 	/* libc's per-proc region (_perproc: _tos, privalloc's): swapped as procs take turns */
 	const pp = x.perproc ? x.perproc.value : 0, ppn = x.perprocsize ? x.perprocsize.value : 0;
@@ -417,6 +422,7 @@ function runprog(env, K, host, pid, job) {
 				throw e;
 			trap = e instanceof Trap ? e.message : 'sys: trap: ' + e.message;
 			console.log('KLOG platform: ' + trap);
+			postMessage({ log: 'platform: ' + trap + ': ' + e.stack.replace(/\n\s*/g, ' < ') });	/* where, on the page's log */
 		}
 		let c = h.cos[h.cur];
 		if (trap !== null) {
@@ -660,7 +666,7 @@ function cpu({ module, mem, role, fn, arg, sp, user }) {
 			const top = (sp - 16) & ~7;
 			new DataView(mem.buffer).setUint32(top, arg, true);
 			env.x.sp.value = top;
-			env.x.table.get(fn)();
+			env.x.table.get(fidx(fn))();
 			// the proc is Dead and this Worker out of the kernel: a Worker less on its Proc and KSTACK (newproc)
 			const gone = env.x.retw.value;
 			if (gone) {
@@ -680,7 +686,7 @@ function cpu({ module, mem, role, fn, arg, sp, user }) {
 }
 
 if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope)
-	self.onmessage = (e) => e.data.role === 'disk' ? disk(e.data) : cpu(e.data);
+	self.onmessage = (e) => e.data.role === 'disk' ? disk(e.data) : e.data.role === 'httpdisk' ? httpdisk(e.data) : cpu(e.data);
 
 /*
  * The disk Worker (devsdw.c): the machine's disk is a file in the
@@ -719,6 +725,87 @@ async function disk({ name, size, fail }) {
 	}
 	self.onmessage = (e) => diskloop(h, e.data.mem, e.data.regs);
 	postMessage({ diskready: h.getSize() });
+}
+
+/*
+ * A read-only disk Worker (devsdw.c's ro): a file on the server, read with
+ * HTTP range requests, or a file of the person's own (a File they chose:
+ * FileReaderSync) - both synchronous, which a Worker may do, so the
+ * disk's loop stays the OPFS disk's (diskloop).  The file is read in
+ * blocks, kept in a cache (the last ones used), and a read that misses
+ * takes some blocks after it too: a program is read from its start on.
+ * First its size ({ diskready } or { diskfail }), then { mem, regs }.
+ */
+const HBLOCK = 64 * 1024, HCACHE = 512, HAHEAD = 8;
+function httpdisk({ url, file }) {
+	const get = file ? (start, end) => new Uint8Array(new FileReaderSync().readAsArrayBuffer(file.slice(start, end))) : (start, end) => {
+		const x = new XMLHttpRequest();
+		x.open('GET', url, false);
+		x.responseType = 'arraybuffer';
+		x.setRequestHeader('Range', 'bytes=' + start + '-' + (end - 1));
+		x.send();
+		if (x.status !== 206)
+			throw new Error(url + ': ' + x.status + (x.status === 200 ? ' (no range requests)' : ''));
+		return new Uint8Array(x.response);
+	};
+	let size;
+	try {
+		if (file) {
+			size = file.size;
+			if (!(size > 0)) throw new Error(file.name + ': empty');
+		} else {
+			const x = new XMLHttpRequest();
+			x.open('HEAD', url, false);
+			x.send();
+			size = Number(x.getResponseHeader('Content-Length'));
+			if (x.status !== 200 || !(size > 0))
+				throw new Error(url + ': ' + x.status);
+			get(0, 1);	/* ranges, or fail now */
+		}
+	} catch (e) {
+		postMessage({ diskfail: String(e) });
+		close();
+		return;
+	}
+	const cache = new Map();	/* block number -> its bytes, in the order used */
+	const block = (b) => {
+		let v = cache.get(b);
+		if (v) {
+			cache.delete(b);
+			cache.set(b, v);
+			return v;
+		}
+		let n = 1;
+		while (n < HAHEAD && (b + n) * HBLOCK < size && !cache.has(b + n))
+			n++;
+		const all = get(b * HBLOCK, Math.min((b + n) * HBLOCK, size));
+		for (let i = 0; i < n; i++) {
+			const x = all.subarray(i * HBLOCK, (i + 1) * HBLOCK);
+			cache.set(b + i, x);
+			if (i === 0) v = x;
+		}
+		while (cache.size > HCACHE)
+			cache.delete(cache.keys().next().value);
+		return v;
+	};
+	const h = {
+		getSize: () => size,
+		read: (v, { at }) => {
+			let n = 0;
+			while (n < v.length && at + n < size) {
+				const b = Math.floor((at + n) / HBLOCK), o = (at + n) % HBLOCK, x = block(b);
+				const k = Math.min(v.length - n, x.length - o);
+				v.set(x.subarray(o, o + k), n);
+				n += k;
+			}
+			return n;
+		},
+		write: () => { throw new Error('a read-only disk'); },
+		flush: () => {},
+		close: () => {},
+	};
+	self.onmessage = (e) => diskloop(h, e.data.mem, e.data.regs);
+	postMessage({ diskready: size });
 }
 
 /* the disk's state Dead, and the request the kernel waits for ended with -1 (devsdw.c: Rstate, Rresult, Rdone) */
@@ -788,6 +875,8 @@ function diskloop(h, mem, regs) {
 // on the page: the machine
 // front: { eia(bytes), halt(why), fs (the root's archive, devrootfs.c), args (init's argv: plan9.ini's init=),
 //	disk ({ name, size }: the OPFS file that is the machine's disk, #S/sdW0, at least size bytes),
+//	dist ({ url } or { file }: a file on the server, or a File the person chose, as a read-only disk,
+//	#S/sdW1: the distribution),
 //	config (more plan9.ini lines), canvas, screen ({ w, h }, 1024x768 without: the framebuffer, shown on
 //	the canvas; its pointer the mouse) - what the firmware puts in BootInfo (firmware()),
 //	ws (the machine's webterm: ws://host:port, the network's WebSockets),
@@ -795,10 +884,11 @@ function diskloop(h, mem, regs) {
 /*
  * The firmware's boot from the disk (as UEFI boots from an esp): the OPFS
  * file read as it is (a File: no lock, before the disk Worker takes it),
- * its GPT's EFI system partition (9front's useesp: 9fat), FAT12/16/32 with
- * VFAT's long names, and on it the kernel (bootfile= in plan9.ini, default
- * 9wasm32.wasm), its boot root (root.fs) and plan9.ini - the installer
- * puts them there.  null: no such disk, the network's then.
+ * a FAT on it: 9fat in the GPT's plan9 partition (prep's), else the EFI
+ * system partition (9front's useesp), FAT12/16/32 with VFAT's long names;
+ * on it plan9.ini, the kernel (bootfile=, default 9wasm32.wasm) and its
+ * boot file system (bootfs=, default the kernel's name with .fs) - the
+ * installer puts them there (inst/bootsetup).  null: no such disk, the network's then.
  */
 export async function diskboot(name = 'sdW0') {
 	const no = (why) => { console.log('KLOG platform: no disk boot: ' + why); return null; };
@@ -819,22 +909,48 @@ export async function diskboot(name = 'sdW0') {
 	if (String.fromCharCode(...new Uint8Array(h.buffer, 0, 8)) !== 'EFI PART') return no('no GPT');
 	const lba = Number(h.getBigUint64(72, true)), nent = h.getUint32(80, true), esz = h.getUint32(84, true);
 	const ents = await rd(lba*512, Math.min(nent, 128)*esz);
-	const ESP = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b';
+	const ESP = 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b', PLAN9 = 'c91818f9-8025-47af-89d2-f030d7000c2c';
 	const guid = (o) => {
 		const b = new Uint8Array(ents.buffer, o, 16), x = (i) => b[i].toString(16).padStart(2, '0');
 		return [3, 2, 1, 0].map(x).join('') + '-' + [5, 4].map(x).join('') + '-' + [7, 6].map(x).join('') + '-' +
 			[8, 9].map(x).join('') + '-' + [10, 11, 12, 13, 14, 15].map(x).join('');
 	};
-	let start = -1;
-	for (let i = 0; i < Math.min(nent, 128); i++)
-		if (guid(i*esz) === ESP) { start = Number(ents.getBigUint64(i*esz + 32, true))*512; break; }
-	if (start < 0) return no('no esp');
-	/* FAT: its BPB, the FAT, the root directory, a file's clusters */
+	/* the FATs it can boot from: 9fat in the plan9 partition (prep's table, its sector 1: part NAME START END,
+	   in its sectors) - 9front's own, the installer's default - else the esp */
+	const fats = [];
+	for (let i = 0; i < Math.min(nent, 128); i++) {
+		const g = guid(i*esz), st = Number(ents.getBigUint64(i*esz + 32, true));
+		if (g === PLAN9) {
+			const t = new TextDecoder().decode(new Uint8Array((await rd((st + 1)*512, 512)).buffer));
+			const m = t.startsWith('part') && t.match(/^part 9fat (\d+) (\d+)$/m);
+			if (m) fats.unshift((st + Number(m[1]))*512);
+		} else if (g === ESP)
+			fats.push(st*512);
+	}
+	if (!fats.length) return no('no 9fat, no esp');
+	const why = [];
+	for (const start of fats) {
+		const fat = await fatfiles(f, rd, start);
+		if (typeof fat === 'string') { why.push(fat); continue; }
+		const ini = await fat.get('plan9.ini');
+		if (!ini) { why.push('no plan9.ini in ' + fat.names.join(' ')); continue; }
+		const conf = new TextDecoder().decode(ini);
+		const bootfile = (conf.match(/^bootfile=(\S+)/m) ?? [])[1] ?? '9wasm32.wasm';
+		const bootfs = (conf.match(/^bootfs=(\S+)/m) ?? [])[1] ?? bootfile.replace(/\.wasm$/, '') + '.fs';
+		const kernel = await fat.get(bootfile), fs = await fat.get(bootfs);
+		if (!kernel || !fs) { why.push('no ' + bootfile + ' or ' + bootfs + ' in ' + fat.names.join(' ')); continue; }
+		return { kernel, fs, conf, get: fat.get };
+	}
+	return no(why.join('; '));
+}
+
+/* a FAT12/16/32 file system at start in f (rd: a DataView of its bytes): { names, get(name): its bytes or null }, or why not */
+async function fatfiles(f, rd, start) {
 	const b = await rd(start, 512);
 	const bps = b.getUint16(11, true), spc = b.getUint8(13), rsv = b.getUint16(14, true), nfat = b.getUint8(16);
 	const nroot = b.getUint16(17, true), tot = b.getUint16(19, true) || b.getUint32(32, true);
 	const fsz = b.getUint16(22, true) || b.getUint32(36, true);
-	if (bps !== 512 || !spc || !nfat || !fsz) return no('esp is not FAT');
+	if (bps !== 512 || !spc || !nfat || !fsz) return 'not FAT';
 	const rootsecs = Math.ceil(nroot*32/bps), data = rsv + nfat*fsz + rootsecs;
 	const nclus = Math.floor((tot - data)/spc), bits = nclus < 4085 ? 12 : nclus < 65525 ? 16 : 32;
 	const fat = new Uint8Array(await f.slice(start + rsv*bps, start + (rsv + fsz)*bps).arrayBuffer());
@@ -877,41 +993,42 @@ export async function diskboot(name = 'sdW0') {
 			files.set((lfn || short).toLowerCase(), { clus: (bits === 32 ? e.getUint16(20, true) << 16 : 0) | e.getUint16(26, true), len: e.getUint32(28, true) });
 		lfn = '';
 	}
-	const get = async (n) => { const x = files.get(n.toLowerCase()); return x ? chain(x.clus, x.len) : null; };
-	const ini = await get('plan9.ini');
-	const conf = ini ? new TextDecoder().decode(ini) : '';
-	const bootfile = (conf.match(/^bootfile=(\S+)/m) ?? [])[1] ?? '9wasm32.wasm';
-	const kernel = await get(bootfile), fs = await get('root.fs');
-	if (!kernel || !fs) return no('esp has ' + [...files.keys()].join(' '));
-	return { kernel, fs, conf };
+	return { names: [...files.keys()], get: async (n) => { const x = files.get(n.toLowerCase()); return x ? chain(x.clus, x.len) : null; } };
 }
 
 export async function boot(url, front = {}) {
 	/* the kernel: a URL, or its bytes (the disk's: diskboot) */
 	const module = typeof url === 'string' ? await WebAssembly.compileStreaming(fetch(url)) : await WebAssembly.compile(url);
-	/* the disk first, as firmware finds its devices before it boots: the OPFS file's size */
-	let dw = null, disksize = 0;
-	if (front.disk) {
-		dw = new Worker(import.meta.url, { type: 'module' });
+	/*
+	 * the disks first, as firmware finds its devices before it boots: sdW0 the OPFS file
+	 * (front.disk), sdW1 the server's or a local file (front.dist: { url } or { file }, read-only);
+	 * each a Worker and its size
+	 */
+	const want = [front.disk ? { role: 'disk', name: front.disk.name ?? 'sdW0', size: front.disk.size, fail: front.disk.fail } : null,
+		front.dist ? { role: 'httpdisk', url: front.dist.url, file: front.dist.file } : null];
+	const dws = await Promise.all(want.map(async (w, i) => {
+		if (!w) return null;
+		const dw = new Worker(import.meta.url, { type: 'module' });
 		const r = await new Promise((done) => {
 			dw.onmessage = (e) => done(e.data);
 			dw.onerror = (e) => done({ diskfail: e.message });
-			dw.postMessage({ role: 'disk', name: front.disk.name ?? 'sdW0', size: front.disk.size, fail: front.disk.fail });
+			dw.postMessage(w);
 		});
-		if (r.diskready) {
-			disksize = r.diskready;
-			dw.onmessage = (e) => { if (e.data.log !== undefined) console.log('KLOG ' + e.data.log); };
-		} else {
-			console.log('KLOG platform: no disk: ' + r.diskfail);
-			dw = null;
+		if (!r.diskready) {
+			console.log('KLOG platform: no disk sdW' + i + ': ' + r.diskfail);
+			dw.terminate();
+			return null;
 		}
-	}
-	const { mem, pa, fb, regs } = firmware(front, disksize);
-	if (dw) {
-		Atomics.store(new Int32Array(mem.buffer), (regs >> 2) + 8, 1);	/* Online (devsdw.c's Rstate) */
-		dw.onerror = (e) => { console.log('KLOG platform: disk Worker: ' + e.message + ': the disk is dead'); diskdead(mem, regs); };
-		dw.postMessage({ mem, regs });
-	}
+		dw.onmessage = (e) => { if (e.data.log !== undefined) console.log('KLOG ' + e.data.log); };
+		return { dw, size: r.diskready, ro: w.role === 'httpdisk' };
+	}));
+	const { mem, pa, fb, regs } = firmware(front, dws.map((d) => d && { size: d.size, ro: d.ro }));
+	dws.forEach((d, i) => {
+		if (!d) return;
+		Atomics.store(new Int32Array(mem.buffer), (regs[i] >> 2) + 8, 1);	/* Online (devsdw.c's Rstate) */
+		d.dw.onerror = (e) => { console.log('KLOG platform: disk Worker: ' + e.message + ': the disk is dead'); diskdead(mem, regs[i]); };
+		d.dw.postMessage({ mem, regs: regs[i] });
+	});
 	const eia = [];
 	let ring = 0;		/* #t/eia0's input: the kernel's ring */
 	let kring = 0;		/* #b/kbd's (devkbd.c) */

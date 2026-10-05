@@ -6,9 +6,10 @@
 # relay to the machine's network gateway (127.0.0.1:GATEWAY, a webterm:
 # the page's WebSockets go to the next port on loopback, kernel.html).
 # $PLAN9INI, if set, is the page's plan9.ini (GET /plan9.ini; else DIR's,
-# if it has one).  Offline, and the tests' page server.
+# if it has one).  A Range request gets that part (206): the ISO, the
+# machine's read-only disk.  Offline, and the tests' page server.
 #   tools/serve [-d DIR] [-g GATEWAY] [PORT]	default 18300, 17080
-import asyncio, http.server, os, sys, threading
+import asyncio, http.server, os, re, sys, threading
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 args = sys.argv[1:]
 d = os.path.join(root, 'build/live')
@@ -45,12 +46,34 @@ class H(http.server.SimpleHTTPRequestHandler):
 		if p == '/plan9.ini' and os.environ.get('PLAN9INI') is not None:
 			return self.body((os.environ['PLAN9INI'] + '\n').encode(), 'text/plain')
 		f = os.path.join(d, p.lstrip('/'))
+		rng = re.match(r'bytes=(\d+)-(\d*)$', self.headers.get('Range', ''))
+		if rng and os.path.isfile(f):	# a part of it: the distribution's ISO, the machine's read-only disk
+			size = os.path.getsize(f)
+			a = int(rng.group(1))
+			b = min(int(rng.group(2)) + 1 if rng.group(2) else size, size)
+			if a >= size or b <= a:
+				self.send_response(416)
+				self.send_header('Content-Range', 'bytes */%d' % size)
+				self.send_header('Content-Length', '0')
+				self.end_headers()
+				return
+			with open(f, 'rb') as fd:
+				fd.seek(a)
+				data = fd.read(b - a)
+			self.send_response(206)
+			self.send_header('Content-Type', 'application/octet-stream')
+			self.send_header('Content-Range', 'bytes %d-%d/%d' % (a, b - 1, size))
+			self.send_header('Content-Length', str(len(data)))
+			self.end_headers()
+			self.wfile.write(data)
+			return
 		if os.path.isfile(f) and 'gzip' in self.headers.get('Accept-Encoding', '') and os.path.isfile(f + '.gz'):
 			return self.body(open(f + '.gz', 'rb').read(), TYPES.get(os.path.splitext(p)[1], 'application/octet-stream'), True)
 		super().do_GET()
 	def log_message(self, *a):
 		pass
 H.extensions_map.update(TYPES)
+H.protocol_version = 'HTTP/1.1'	# keep-alive: the disk's many range requests on one connection
 
 async def pipe(r, w):
 	try:

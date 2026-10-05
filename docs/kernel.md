@@ -36,11 +36,12 @@ draw, mouse, tls - and the platform's own:
 | | | |
 |---|---|---|
 | `#R` | `devrootfs.c` | the boot file system, read-only, from BootInfo's `rdbase`/`rdlen` (`tools/bootfs`) |
-| `#S` | `devsdw.c` | the disk, `sdW0`: a file in the origin's private file system (OPFS), a Worker's sync handle; GPT and prep partitions as sd's (`part`, `delpart`) |
+| `#S` | `devsdw.c` | the disks: `sdW0`, a file in the origin's private file system (OPFS), a Worker's sync handle; `sdW1`, read-only, the distribution's ISO (the server's, by HTTP range requests, or a local file); GPT and prep partitions as sd's (`part`, `delpart`); `sdctl` |
 | `#I` | `devwsnet.c` | the network: `/net/tcp` and `/net/cs` over WebSockets to the page's origin, a path per port (`/567` auth, `/17019` rcpu ...) |
 | `#b` | `devkbd.c` | the keyboard: the browser's key events as runes for kbdfs |
 | `#t` | `uartwasm32.c` | the serial port `eia0`: the page's console |
 | `#ω` | `devwebauthn.c` | WebAuthn (`docs/webauthn.md`) |
+| `#¶` | `devswap.c` | `swap`: the memory, as 9front's devswap says it (no paging, no swap) |
 | screen | `screen.c` | XRGB32 in the kernel's memory, drawn by the page on its canvas (`platflush`) |
 
 The network's WebSockets are the page's (a Worker waiting in
@@ -53,9 +54,19 @@ cannot fill the page.
 
 `main` takes the BootInfo, makes the memory, the procs and the devices,
 and starts init: `init=` in the config (BootInfo's plan9.ini), by default
-`/bin/rc /boot/init` from `#R`.  `/boot/init` (`sys/src/9/wasm32/init`)
-does what 9front's bootrc does on a terminal: the time zone, mntgen,
-factotum, the disk (`/boot/disk`: hjfs on `#S/sdW0` or its `fs`
-partition, glenda's home kept there), kbdfs on the console, the keys from
-secstore if there is one (`/boot/secstore`), then glenda's `rc -l`: her
-profile starts rio.
+`/bin/rc /boot/init`.  The root is `#/`, as 9front's, with the boot file
+system `#R` bound over it; a clean name space (newns) is `#/` alone.
+
+`/boot/init` (`sys/src/9/wasm32/init`) does what 9front's bootrc does on a
+terminal: the mount points, kbdfs on the console, factotum, the disk's
+partitions; then the root - `bootargs=local!DEVICE` (the installed file
+system: hjfs, gefs or cwfs on `/dev/sdW0/fs`), or with `cdboot` the
+distribution's CD (`/dev/sdW1/data`, 9660srv: the live image).  Its file
+server is posted as `/srv/boot`, the root goes before the boot file
+system, and 9front's own init runs from it: `/lib/namespace`, termrc,
+glenda's profile, rio (`docs/install.md`).  Without a root, the boot file
+system alone: glenda's home on the disk (`/boot/disk`), the keys from
+secstore (`/boot/secstore`), her rc and rio.
+
+`#c/reboot` (fshalt -r) flushes the disks, and the page loads itself
+again, as firmware starts over.

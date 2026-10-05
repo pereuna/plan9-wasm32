@@ -213,7 +213,7 @@ def main():
 			for line in sends:
 				if isinstance(line, list):	# [text, line]: typed once eia0 has said text since the last one (a prompt)
 					want, line = line
-					end = time.time() + 60
+					end = time.time() + float(os.environ.get('SENDWAIT', '60'))	# SENDWAIT=s: a prompt's longest wait
 					while time.time() < end and not any(l.startswith('KERNEL-HALT') for l in cdp.log):
 						o = cdp.js('window.plan9.eia0out()') or ''
 						i = o.find(want, seen)

@@ -155,10 +155,20 @@ reboot(void*, void*, ulong)
 	exit(0);
 }
 
+/*
+ * #c/reboot (fshalt -r): the disks flushed, and the page starts the
+ * machine again (kernel.html: it loads itself again, as firmware starts
+ * over); another kernel, its argument, is not for this machine
+ */
 void
-rebootcmd(int, char**)
+rebootcmd(int argc, char**)
 {
-	error(Egreg);
+	if(argc > 0)
+		error("wasm32 reboots its own kernel: the page's");
+	sdwflushall();
+	plathalt("reboot");
+	for(;;)
+		tsleep(&up->sleep, return0, nil, 1000000);
 }
 
 int

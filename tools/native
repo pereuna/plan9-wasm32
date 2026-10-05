@@ -28,6 +28,13 @@ case $k in *[dmpqrtx]*) ;; *) k=r$k ;; esac
 exec /usr/bin/ar "$k" "$@"
 X
 chmod 775 "$bin/ar"
+# size, which some mkfiles run on what they made (cwfs): Plan 9's says the
+# segments; the host's knows no wasm32 module - its size in bytes instead
+cat >"$bin/size" <<'X'
+#!/bin/sh
+for f; do echo "$f: $(wc -c <"$f") bytes"; done
+X
+chmod 775 "$bin/size"
 rm -f "$bin/mk" "$bin/rc.mk"
 # mpc (libsec's and libauthsrv's X.mp to C), a program for the host: the
 # release ships its output for some, not libauthsrv's; built here with
@@ -84,11 +91,18 @@ if [ -e "$k/mklatin.c" ] && [ ! -e "$k/latin1.h" ]; then
 		./mklatin "$tree/lib/keyboard" >"$k/latin1.h") || { echo "native: latin1.h" >&2; rm -f "$k/latin1.h"; exit 1; }
 	rm -rf "$m"
 fi
+# awk's y.tab.h and awkgram.c (yacc's): the release ships awkgram.c but
+# not y.tab.h; both made here with plan9port's yacc (its tokens are the
+# release's proctab.c's, made by maketab from 9front's yacc's)
+aw=$tree/sys/src/cmd/awk
+if [ -e "$aw/awkgram.y" ] && [ ! -e "$aw/y.tab.h" ]; then
+	(cd "$aw" && "$PLAN9/bin/yacc" -d -o awkgram.c awkgram.y >/dev/null 2>&1) || { echo "native: awk's grammar" >&2; exit 1; }
+fi
 # what the kernel and the boot file system's programs need, in order, and
 # those programs (sys/src/9/wasm32/bootfs.proto)
-libs="libc libthread libmp libsec libbio libregexp libString libauth libauthsrv lib9p libip libndb libdraw libmemdraw libmemlayer libframe libcomplete libplumb libcontrol libflate libdisk"
-one="basename cat cleanname cp date echo ls mkdir mv rm sleep sort touch wc xd bind unmount ns sed mount pwd ps read test chmod tlsclient mntgen ramfs tar stats webcookies clock"
-cmds="cmd/rc cmd/hjfs cmd/rio cmd/aux/kbdfs cmd/auth/factotum cmd/auth/secstore:secstore.install,aescbc.install cmd/aux/seckeys cmd/exportfs cmd/plumb cmd/disk/prep cmd/disk:format.install,mkfs.install,mkext.install cmd/dossrv cmd/gzip:gunzip.install cmd/webfs cmd:$(echo $one | sed 's/\([^ ]*\)/\1.install/g; s/ /,/g')"
+libs="libc libthread libmp libsec libbio libregexp libString libauth libauthsrv lib9p libip libndb libdraw libmemdraw libmemlayer libframe libcomplete libplumb libcontrol libflate libdisk libavl"
+one="basename cat cleanname cp date dd echo ls mkdir mv rm sleep sort touch wc xd bind unmount ns sed mount pwd ps read test chmod tlsclient mntgen ramfs tar stats webcookies clock"
+cmds="cmd/rc cmd/hjfs cmd/rio cmd/aux/kbdfs cmd/auth/factotum cmd/auth/secstore:secstore.install,aescbc.install cmd/aux/seckeys cmd/exportfs cmd/plumb cmd/disk/prep cmd/disk:format.install,mkfs.install,mkext.install cmd/dossrv cmd/9660srv cmd/gefs cmd/cwfs cmd/gzip:gunzip.install cmd/webfs cmd:$(echo $one | sed 's/\([^ ]*\)/\1.install/g; s/ /,/g')"
 dirs=${*:-$libs 9/wasm32 $cmds}
 # /lib/ucd: libc/ucd's tables are made from it, but they come made (its *data
 # files); stand-ins older than the tables.  aux/kbdfs's latin1.h, made from

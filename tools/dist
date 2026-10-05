@@ -1,0 +1,102 @@
+#!/bin/bash
+# The distribution, as 9front's ISO: the whole release built for wasm32
+# (tools/native with mk -k: the libraries, the commands, the games, the
+# kernel; what does not build is listed in build/dist/failed) in a tree of
+# its own, its boot materials in /wasm32 - the kernel (9wasm32.wasm), and
+# in /wasm32/9fat its boot file system (9wasm32.fs, tools/bootfs) and the
+# firmware (index.html, platform.js), which the installer puts on the boot
+# FAT with plan9.ini (inst/bootsetup) - and
+# made an ISO 9660 image with plan9port's mk9660 (9front's -c9j: ISO 9660's names, Plan 9's own in its extension, as 9660srv reads them; Plan 9's
+# names and modes, Joliet): build/dist/plan9-wasm32.iso; and the live
+# image that boots it, build/dist/live.  Left out: the
+# other machines' binaries and libraries (their headers stay: libmach
+# and the cross compilers), the build's objects, and 9front's off-topic
+# files (tools/dist.deny: jokes and quotations).  /dist/9front is there,
+# as the installer looks for it (inst/mountdist).
+#   PLAN9=... tools/dist
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
+[ -x "${PLAN9:-}/bin/mk" ] || { echo "dist: PLAN9 must name a plan9port with mk and rc" >&2; exit 2; }
+d=$root/build/dist
+tree=$d/tree
+mkdir -p "$d"
+"$here/tree" "$tree" >/dev/null
+libs=$(cd "$tree/sys/src" && ls -d lib* | grep -v '^libc$')
+# what the boot file system has first (native's own list: a failure is the build's), then all of it,
+# on past what fails (9front's mkfiles loop over a directory's directories with rc -e: the
+# first failure ends the loop)
+TREE=$tree "$here/native" >"$d/build.log" 2>&1 || { tail -20 "$d/build.log"; echo "dist: the boot file system's programs failed (build/dist/build.log)" >&2; exit 1; }
+TREE=$tree MKFLAGS=-k "$here/native" libc $libs cmd games 9/wasm32 >>"$d/build.log" 2>&1 || true
+# aux's and ip's own programs (aux/listen, aux/timesync ...): their install waits for their
+# directories' (installdirs), whose rc loop ends at the first that fails; each, as mkmany installs it
+for dd in cmd/aux cmd/ip; do
+	t=$(python3 - "$tree/sys/src/$dd/mkfile" <<'PY'
+import re, sys
+m = re.search(r'^TARG\s*=((?:.*\\\n)*.*)$', open(sys.argv[1]).read(), re.M)
+print(','.join(n + '.install' for n in m.group(1).replace('\\', ' ').split()))
+PY
+)
+	TREE=$tree MKFLAGS=-k "$here/native" "$dd:$t" >>"$d/build.log" 2>&1 || true
+done
+grep '^mk: ' "$d/build.log" >"$d/failed" || true
+# the boot materials
+w=$tree/sys/src/9/wasm32
+[ -e "$tree/wasm32/9wasm32.wasm" ] || { echo "dist: no kernel (build/dist/build.log)" >&2; exit 1; }
+# /$cputype/9fat: what goes onto the boot FAT with the kernel and plan9.ini (inst/bootsetup)
+fat=$tree/wasm32/9fat
+mkdir -p "$fat"
+"$here/bootfs" "$tree" "$fat/9wasm32.fs" "$w/bootfs.proto" >/dev/null
+v="$(git -C "$root" describe --always --dirty 2>/dev/null || echo unknown) $(date -u +%Y-%m-%dT%H:%MZ)"
+sed "s|@VERSION@|$v|" "$w/kernel.html" >"$fat/index.html"
+cp "$w/platform.js" "$fat/platform.js"
+
+# the image's root
+out=$d/root
+rm -rf "$out"; mkdir -p "$out"
+for t in "$tree"/*; do
+	n=$(basename "$t")
+	case $n in
+	tmp) mkdir -p "$out/$n" ;;
+	386|68000|68020|amd64|arm|arm64|mips|power|power64|sparc|sparc64|spim)
+		mkdir -p "$out/$n"; [ ! -d "$t/include" ] || cp -a "$t/include" "$out/$n/" ;;
+	*) cp -a "$t" "$out/" ;;
+	esac
+done
+find "$out/sys/src" -type f \( -name '*.3' -o -name '3.*' -o -name '*.a3' \) -delete
+removed=0
+while read -r rx; do
+	case $rx in ''|'#'*) continue ;; esac
+	for f in $(cd "$out" && find . -type f | sed 's|^\.||' | grep -E "$rx" || true); do
+		rm -f "$out$f"; removed=$((removed+1))
+	done
+done <"$here/dist.deny"
+mkdir -p "$out/dist/9front" "$out/usr/glenda/bin/wasm32"
+# the proto: every file and directory, owned by sys as 9front's distproto has them (mkfs -U, the
+# installer's copydist, keeps the owners; the host's mean nothing to the machine's file server)
+python3 - "$out" "$d/proto" <<'PY'
+import os, sys
+out, proto = sys.argv[1:]
+def walk(d, depth, o):
+	for n in sorted(os.listdir(d)):
+		p = os.path.join(d, n)
+		if os.path.isdir(p) and not os.path.islink(p):
+			o.write('\t' * depth + '%s\td775 sys sys\n' % n)
+			walk(p, depth + 1, o)
+		elif os.path.isfile(p):
+			o.write('\t' * depth + '%s\t%s sys sys\n' % (n, '775' if os.stat(p).st_mode & 0o111 else '664'))
+with open(proto, 'w') as o:
+	walk(out, 0, o)
+PY
+rm -f "$d/plan9-wasm32.iso"
+(cd "$d" && PATH=$PLAN9/bin:$PATH "$PLAN9/bin/dump9660" -M -c9j -p "$d/proto" -s "$out" -v 'Plan9-wasm32' "$d/plan9-wasm32.iso")
+echo "dist: $d/plan9-wasm32.iso ($(du -h "$d/plan9-wasm32.iso" | cut -f1)): $(find "$out/wasm32/bin" -type f | wc -l) programs, $removed off-topic files left out; $(wc -l <"$d/failed") build failures (build/dist/failed)"
+# the live image (as 9front's ISO boots): the page, the kernel, its boot file system and plan9.ini
+# - cdboot: /boot/init mounts the CD (iso=: the page's read-only disk, sdW1) as the root
+live=$d/live
+rm -rf "$live"; mkdir -p "$live"
+cp "$fat/index.html" "$fat/platform.js" "$fat/9wasm32.fs" "$tree/wasm32/9wasm32.wasm" "$live/"
+printf 'cdboot=yes\niso=plan9-wasm32.iso\n' >"$live/plan9.ini"
+for f in "$live"/*; do gzip -9 -n -k "$f"; done
+ln "$d/plan9-wasm32.iso" "$live/plan9-wasm32.iso"
+echo "dist: the live image in $live (tools/serve -d $live)"
+

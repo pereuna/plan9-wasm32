@@ -1,0 +1,8 @@
+# 9front's off-topic files, left out of the distribution (tools/dist):
+# its jokes and quotation collections, and the scripts that only print
+# them.  No program needs them.  Games stay.  Regular expressions on a
+# file's path in the distribution.
+^/lib/(bullshit|theo|troll|rob|ken|rsc|uriel|dougfacts|glass|greg|roa|faust|strangelove|constitution|gettysburg|1oct1993|human|plentyofroom|mammals|volcanoes)$
+^/lib/1oct1993/
+^/rc/bin/(bullshit|theo|troll|nietzsche)$
+^/sys/games/lib/fortunes$

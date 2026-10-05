@@ -6,14 +6,16 @@
 #include	"../port/error.h"
 
 /*
- * #S: wasm32's disk (docs/kernel.md), as sd names one:
- * #S/sdW0/{ctl,data}.  The disk is a file in the origin's private file
+ * #S: wasm32's disks (docs/kernel.md), as sd names them:
+ * #S/sdWn/{ctl,data}.  sdW0 is a file in the origin's private file
  * system (OPFS), which only a Worker can use synchronously and only one
- * at a time: the page's disk Worker owns it (platform.js, disk()).  The
- * page, as the firmware, describes the disk in BootInfo's config as a
- * machine's firmware describes a device:
+ * at a time: the page's disk Worker owns it (platform.js, disk()).  sdW1
+ * is read-only, a file on the server (the distribution, as a PC's CD:
+ * its Worker reads it with HTTP range requests).  The page, as the
+ * firmware, describes a disk in BootInfo's config as a machine's
+ * firmware describes a device:
  *
- *	*sdW0=regs bytes
+ *	*sdWn=regs bytes [ro]
  *
  * regs is a page of the kernel's memory the map calls Reserved - the
  * disk's registers, words the disk Worker waits on (Atomics.wait) - and
@@ -29,7 +31,10 @@
  * Partitions as sd's (sd(3)): "part NAME START END" (sectors of 512
  * bytes) on ctl makes #S/sdW0/NAME, "delpart NAME" takes it away, and ctl
  * says them as "part" lines - what disk/fdisk -p and disk/prep -p write
- * (9front's diskparts).  data is the whole disk.
+ * (9front's diskparts).  data is the whole disk.  #S/sdctl says the
+ * disks, as sd(3)'s does its controllers, and takes its config
+ * messages (fshalt's) as done.  A qid's path is the
+ * unit's number and the file (Qunit ...) in its low bits.
  */
 enum
 {
@@ -55,6 +60,7 @@ enum
 	Opflush,
 
 	Qtop	= 0,
+	Qsdctl,		/* #S/sdctl: the controller, as sd(3)'s */
 	Qunit,
 	Qctl,
 	Qdata,
@@ -62,7 +68,13 @@ enum
 
 	Npart	= 16,
 	Secsize	= 512,
+	Ndisk	= 2,
+	Qshift	= 8,	/* a qid's path: unit<<Qshift | file */
 };
+
+#define QFILE(q)	((ulong)(q).path & ((1<<Qshift)-1))
+#define QUNIT(q)	((ulong)(q).path >> Qshift)
+#define QID(u, f)	((u)<<Qshift | (f))
 
 typedef struct Part Part;
 struct Part
@@ -73,17 +85,22 @@ struct Part
 	int	valid;
 };
 
-static struct
+typedef struct Disk Disk;
+struct Disk
 {
 	QLock;
+	char	name[8];	/* sdWn */
 	long	*reg;
 	uchar	*dma;
 	uvlong	size;
+	int	ro;
 	ulong	reqs;
 	ulong	errs;
 	int	dead;	/* ours: a request took too long */
 	Part	part[Npart];
-} disk;
+};
+
+static Disk disks[Ndisk];
 
 static Dirtab unitdir[] = {
 	"ctl",	{Qctl},		0,	0664,
@@ -108,79 +125,108 @@ sdwreserved(uvlong pa, uvlong len)
 static void
 sdwreset(void)
 {
-	char *s, *f[3];
-	char buf[128];
+	char *s, *f[4], buf[128], name[16];
 	uvlong regs, size;
+	Disk *d;
+	int n, u;
 
-	if((s = getconf("*sdW0")) == nil)
-		return;
-	strecpy(buf, buf+sizeof buf, s);
-	if(tokenize(buf, f, nelem(f)) != 2){
-		print("sdW0: *sdW0=%s: not regs and bytes\n", s);
-		return;
+	for(u = 0; u < Ndisk; u++){
+		d = &disks[u];
+		snprint(d->name, sizeof d->name, "sdW%d", u);
+		snprint(name, sizeof name, "*%s", d->name);
+		if((s = getconf(name)) == nil)
+			continue;
+		strecpy(buf, buf+sizeof buf, s);
+		n = tokenize(buf, f, nelem(f));
+		if(n != 2 && (n != 3 || strcmp(f[2], "ro") != 0)){
+			print("%s: %s=%s: not regs, bytes and ro or none\n", d->name, name, s);
+			continue;
+		}
+		regs = strtoull(f[0], nil, 0);
+		size = strtoull(f[1], nil, 0);
+		/* the registers: a page the map keeps from the kernel, in the memory */
+		if(regs == 0 || (regs & (BY2PG-1)) != 0 || size == 0
+		|| !sdwreserved(regs, BY2PG) || bootearlymap(regs, BY2PG) == nil){
+			print("%s: %s=%s: no such registers\n", d->name, name, s);
+			continue;
+		}
+		if((d->dma = xalloc(Ndma)) == nil){
+			print("%s: no memory for its buffer\n", d->name);
+			continue;
+		}
+		d->reg = (long*)(uintptr)regs;
+		d->size = size;
+		d->ro = n == 3;
+		print("%s: %s, %llud bytes\n", d->name, d->ro ? "the distribution (read-only)" : "OPFS disk", size);
 	}
-	regs = strtoull(f[0], nil, 0);
-	size = strtoull(f[1], nil, 0);
-	/* the registers: a page the map keeps from the kernel, in the memory */
-	if(regs == 0 || (regs & (BY2PG-1)) != 0 || size == 0
-	|| !sdwreserved(regs, BY2PG) || bootearlymap(regs, BY2PG) == nil){
-		print("sdW0: *sdW0=%s: no such registers\n", s);
-		return;
-	}
-	if((disk.dma = xalloc(Ndma)) == nil){
-		print("sdW0: no memory for its buffer\n");
-		return;
-	}
-	disk.reg = (long*)(uintptr)regs;
-	disk.size = size;
-	print("sdW0: OPFS disk, %llud bytes\n", size);
 }
 
 static int
 sdwgen(Chan *c, char*, Dirtab*, int, int s, Dir *dp)
 {
 	Qid q;
+	Disk *d;
+	int u, i;
 
 	if(s == DEVDOTDOT){
 		mkqid(&q, Qtop, 0, QTDIR);
 		devdir(c, q, "#S", 0, eve, 0555, dp);
 		return 1;
 	}
-	switch((ulong)c->qid.path){
-	case Qtop:
-		if(s != 0 || disk.reg == nil)
+	if(QFILE(c->qid) == Qsdctl){
+		if(s != 0)
 			return -1;
-		mkqid(&q, Qunit, 0, QTDIR);
-		devdir(c, q, "sdW0", 0, eve, 0555, dp);
+		devdir(c, c->qid, "sdctl", 0, eve, 0664, dp);
 		return 1;
+	}
+	if(QFILE(c->qid) == Qtop){
+		if(s-- == 0){
+			mkqid(&q, Qsdctl, 0, QTFILE);
+			devdir(c, q, "sdctl", 0, eve, 0664, dp);
+			return 1;
+		}
+		for(u = 0; u < Ndisk; u++)
+			if(disks[u].reg != nil && s-- == 0){
+				mkqid(&q, QID(u, Qunit), 0, QTDIR);
+				devdir(c, q, disks[u].name, 0, eve, 0555, dp);
+				return 1;
+			}
+		return -1;
+	}
+	u = QUNIT(c->qid);
+	if(u >= Ndisk || disks[u].reg == nil)
+		return -1;
+	d = &disks[u];
+	switch(QFILE(c->qid)){
 	case Qunit:
 		if(s < nelem(unitdir)){
-			devdir(c, unitdir[s].qid, unitdir[s].name, s == 1 ? disk.size : 0, eve, unitdir[s].perm, dp);
+			mkqid(&q, QID(u, unitdir[s].qid.path), 0, QTFILE);
+			devdir(c, q, unitdir[s].name, s == 1 ? d->size : 0, eve, d->ro && unitdir[s].qid.path == Qdata ? 0440 : unitdir[s].perm, dp);
 			return 1;
 		}
 		s -= nelem(unitdir);
 		if(s >= Npart)
 			return -1;
-		if(!disk.part[s].valid){	/* a gap in the table: skipped, not the end */
+		if(!d->part[s].valid){	/* a gap in the table: skipped, not the end */
 			mkqid(&q, ~0, 0, QTFILE);
 			devdir(c, q, "", 0, eve, 0, dp);
 			return 0;
 		}
-		mkqid(&q, Qpart+s, 0, QTFILE);
-		devdir(c, q, disk.part[s].name, (disk.part[s].end - disk.part[s].start)*Secsize, eve, 0660, dp);
+		mkqid(&q, QID(u, Qpart+s), 0, QTFILE);
+		devdir(c, q, d->part[s].name, (d->part[s].end - d->part[s].start)*Secsize, eve, d->ro ? 0440 : 0660, dp);
 		return 1;
 	default:	/* a file: itself (devstat) */
 		if(s != 0)
 			return -1;
-		if((ulong)c->qid.path >= Qpart){
-			s = (ulong)c->qid.path - Qpart;
-			if(s >= Npart || !disk.part[s].valid)
+		if(QFILE(c->qid) >= Qpart){
+			i = QFILE(c->qid) - Qpart;
+			if(i >= Npart || !d->part[i].valid)
 				return -1;
-			devdir(c, c->qid, disk.part[s].name, (disk.part[s].end - disk.part[s].start)*Secsize, eve, 0660, dp);
+			devdir(c, c->qid, d->part[i].name, (d->part[i].end - d->part[i].start)*Secsize, eve, d->ro ? 0440 : 0660, dp);
 			return 1;
 		}
-		s = (ulong)c->qid.path - Qctl;
-		devdir(c, unitdir[s].qid, unitdir[s].name, s == 1 ? disk.size : 0, eve, unitdir[s].perm, dp);
+		i = QFILE(c->qid) - Qctl;
+		devdir(c, c->qid, unitdir[i].name, i == 1 ? d->size : 0, eve, d->ro && unitdir[i].qid.path == Qdata ? 0440 : unitdir[i].perm, dp);
 		return 1;
 	}
 }
@@ -206,6 +252,9 @@ sdwstat(Chan *c, uchar *db, int n)
 static Chan*
 sdwopen(Chan *c, int omode)
 {
+	if(QFILE(c->qid) != Qtop && QUNIT(c->qid) < Ndisk && disks[QUNIT(c->qid)].ro
+	&& QFILE(c->qid) != Qctl && (omode&3) != OREAD)
+		error(Eperm);
 	return devopen(c, omode, nil, 0, sdwgen);
 }
 
@@ -215,25 +264,25 @@ sdwclose(Chan*)
 }
 
 /*
- * One request to the disk Worker, in and out of disk.dma: what it did, -1
+ * One request to the disk Worker, in and out of d->dma: what it did, -1
  * an error.  The Worker ends a request even when it fails (Rstate Diskdead, the
  * page's too if the Worker itself is gone), so the wait ends; one that
  * takes longer than Diskwait makes the disk dead here.  The Worker only
- * touches disk.dma, which is never freed: if it does come back late, it
+ * touches d->dma, which is never freed: if it does come back late, it
  * writes nothing the kernel uses for anything else.
  */
 static long
-sdwio(int op, long n, uvlong off)
+sdwio(Disk *d, int op, long n, uvlong off)
 {
 	long *r, seq;
 	ulong deadline;
 
-	r = disk.reg;
-	if(disk.dead || r[Rstate] != Diskonline)
+	r = d->reg;
+	if(d->dead || r[Rstate] != Diskonline)
 		return -1;
 	r[Rop] = op;
 	r[Rlen] = n;
-	r[Raddr] = (ulong)(uintptr)disk.dma;
+	r[Raddr] = (ulong)(uintptr)d->dma;
 	r[Rofflo] = (ulong)off;
 	r[Roffhi] = (ulong)(off>>32);
 	r[Rresult] = -1;
@@ -244,33 +293,33 @@ sdwio(int op, long n, uvlong off)
 	deadline = seconds() + Diskwait;
 	while(r[Rdone] != seq){
 		if(seconds() >= deadline){
-			disk.dead = 1;
-			print("sdW0: no answer in %d s: the disk is dead\n", Diskwait);
-			disk.errs++;
+			d->dead = 1;
+			print("%s: no answer in %d s: the disk is dead\n", d->name, Diskwait);
+			d->errs++;
 			return -1;
 		}
 		platwait(&r[Rdone], r[Rdone], 1000);
 	}
-	disk.reqs++;
+	d->reqs++;
 	if(r[Rresult] < 0)
-		disk.errs++;
+		d->errs++;
 	return r[Rresult];
 }
 
 static long
-sdwrw(int op, uchar *a, long n, vlong off)
+sdwrw(Disk *d, int op, uchar *a, long n, vlong off)
 {
 	long m, k, done;
 
 	if(off < 0)
 		error(Ebadarg);
-	if(off >= disk.size)
+	if(off >= d->size)
 		return 0;
-	if(n > disk.size - off)
-		n = disk.size - off;
-	eqlock(&disk);
+	if(n > d->size - off)
+		n = d->size - off;
+	eqlock(d);
 	if(waserror()){
-		qunlock(&disk);
+		qunlock(d);
 		nexterror();
 	}
 	for(done = 0; done < n; done += m){
@@ -278,34 +327,34 @@ sdwrw(int op, uchar *a, long n, vlong off)
 		if(k > Ndma)
 			k = Ndma;
 		if(op == Opwrite)
-			memmove(disk.dma, a+done, k);
-		m = sdwio(op, k, off+done);
+			memmove(d->dma, a+done, k);
+		m = sdwio(d, op, k, off+done);
 		if(m < 0)
 			error(Eio);
 		if(m > k)
 			m = k;
 		if(op == Opread)
-			memmove(a+done, disk.dma, m);
+			memmove(a+done, d->dma, m);
 		if(m < k){
 			done += m;
 			break;
 		}
 	}
 	poperror();
-	qunlock(&disk);
+	qunlock(d);
 	return done;
 }
 
 /* the partition c is, or Enonexist (deleted since) */
 static Part*
-partof(Chan *c)
+partof(Disk *d, Chan *c)
 {
 	ulong i;
 
-	i = (ulong)c->qid.path - Qpart;
-	if(i >= Npart || !disk.part[i].valid)
+	i = QFILE(c->qid) - Qpart;
+	if(i >= Npart || !d->part[i].valid)
 		error(Enonexist);
-	return &disk.part[i];
+	return &d->part[i];
 }
 
 /* n bytes at off, cut to the partition's end */
@@ -325,40 +374,40 @@ partlen(Part *pt, long n, vlong off)
 }
 
 static void
-addpart(char *name, uvlong start, uvlong end)
+addpart(Disk *d, char *name, uvlong start, uvlong end)
 {
 	int i, free;
 
 	if(*name == 0 || strlen(name) >= KNAMELEN || strcmp(name, "ctl") == 0 || strcmp(name, "data") == 0)
 		error(Ebadarg);
-	if(start >= end || end > disk.size/Secsize)
+	if(start >= end || end > d->size/Secsize)
 		error(Ebadarg);
 	free = -1;
 	for(i = 0; i < Npart; i++){
-		if(disk.part[i].valid && strcmp(disk.part[i].name, name) == 0){
-			if(disk.part[i].start == start && disk.part[i].end == end)
+		if(d->part[i].valid && strcmp(d->part[i].name, name) == 0){
+			if(d->part[i].start == start && d->part[i].end == end)
 				return;	/* as it is: diskparts again */
 			error(Eexist);
 		}
-		if(!disk.part[i].valid && free < 0)
+		if(!d->part[i].valid && free < 0)
 			free = i;
 	}
 	if(free < 0)
 		error("too many partitions");
-	strecpy(disk.part[free].name, disk.part[free].name+KNAMELEN, name);
-	disk.part[free].start = start;
-	disk.part[free].end = end;
-	disk.part[free].valid = 1;
+	strecpy(d->part[free].name, d->part[free].name+KNAMELEN, name);
+	d->part[free].start = start;
+	d->part[free].end = end;
+	d->part[free].valid = 1;
 }
 
 static void
-delpart(char *name)
+delpart(Disk *d, char *name)
 {
 	int i;
 
 	for(i = 0; i < Npart; i++)
-		if(disk.part[i].valid && strcmp(disk.part[i].name, name) == 0){
-			disk.part[i].valid = 0;
+		if(d->part[i].valid && strcmp(d->part[i].name, name) == 0){
+			d->part[i].valid = 0;
 			return;
 		}
 	error(Enonexist);
@@ -369,28 +418,41 @@ sdwread(Chan *c, void *a, long n, vlong off)
 {
 	char buf[256 + Npart*(KNAMELEN+48)], *p, *e;
 	Part *pt;
+	Disk *d;
 	int i;
 
-	switch((ulong)c->qid.path){
-	case Qtop:
+	if(QFILE(c->qid) == Qtop)
+		return devdirread(c, a, n, nil, 0, sdwgen);
+	if(QFILE(c->qid) == Qsdctl){
+		p = buf;
+		e = buf+sizeof buf;
+		for(i = 0; i < Ndisk; i++)
+			if(disks[i].reg != nil)
+				p = seprint(p, e, "%s wasm32 %s\n", disks[i].name, disks[i].ro ? "distribution" : "opfs");
+		USED(p);
+		return readstr(off, a, n, buf);
+	}
+	d = &disks[QUNIT(c->qid)];
+	switch(QFILE(c->qid)){
 	case Qunit:
 		return devdirread(c, a, n, nil, 0, sdwgen);
 	case Qctl:
 		p = buf;
 		e = buf+sizeof buf;
-		p = seprint(p, e, "inquiry Plan9-wasm32 OPFS disk\ngeometry %llud 512\nrequests %lud errors %lud\nstate %s\n",
-			disk.size/512, disk.reqs, disk.errs, disk.dead || disk.reg[Rstate] != Diskonline ? "dead" : "online");
+		p = seprint(p, e, "inquiry Plan9-wasm32 %s\ngeometry %llud 512\nrequests %lud errors %lud\nstate %s\n",
+			d->ro ? "distribution" : "OPFS disk",
+			d->size/512, d->reqs, d->errs, d->dead || d->reg[Rstate] != Diskonline ? "dead" : "online");
 		for(i = 0; i < Npart; i++)
-			if(disk.part[i].valid)
-				p = seprint(p, e, "part %s %llud %llud\n", disk.part[i].name, disk.part[i].start, disk.part[i].end);
+			if(d->part[i].valid)
+				p = seprint(p, e, "part %s %llud %llud\n", d->part[i].name, d->part[i].start, d->part[i].end);
 		USED(p);
 		return readstr(off, a, n, buf);
 	case Qdata:
-		return sdwrw(Opread, a, n, off);
+		return sdwrw(d, Opread, a, n, off);
 	}
-	if((ulong)c->qid.path >= Qpart){
-		pt = partof(c);
-		return sdwrw(Opread, a, partlen(pt, n, off), pt->start*Secsize + off);
+	if(QFILE(c->qid) >= Qpart){
+		pt = partof(d, c);
+		return sdwrw(d, Opread, a, partlen(pt, n, off), pt->start*Secsize + off);
 	}
 	error(Egreg);
 	return 0;
@@ -401,8 +463,14 @@ sdwwrite(Chan *c, void *a, long n, vlong off)
 {
 	Cmdbuf *cb;
 	Part *pt;
+	Disk *d;
 
-	switch((ulong)c->qid.path){
+	if(QFILE(c->qid) == Qtop)
+		error(Eperm);
+	if(QFILE(c->qid) == Qsdctl)	/* sd(3)'s config ... (fshalt: switch off): nothing to do */
+		return n;
+	d = &disks[QUNIT(c->qid)];
+	switch(QFILE(c->qid)){
 	case Qctl:
 		cb = parsecmd(a, n);
 		if(waserror()){
@@ -410,33 +478,51 @@ sdwwrite(Chan *c, void *a, long n, vlong off)
 			nexterror();
 		}
 		if(cb->nf == 1 && strcmp(cb->f[0], "flush") == 0){
-			eqlock(&disk);
+			eqlock(d);
 			if(waserror()){
-				qunlock(&disk);
+				qunlock(d);
 				nexterror();
 			}
-			if(sdwio(Opflush, 0, 0) < 0)
+			if(!d->ro && sdwio(d, Opflush, 0, 0) < 0)
 				error(Eio);
 			poperror();
-			qunlock(&disk);
+			qunlock(d);
 		}else if(cb->nf == 4 && strcmp(cb->f[0], "part") == 0)
-			addpart(cb->f[1], strtoull(cb->f[2], nil, 0), strtoull(cb->f[3], nil, 0));
+			addpart(d, cb->f[1], strtoull(cb->f[2], nil, 0), strtoull(cb->f[3], nil, 0));
 		else if(cb->nf == 2 && strcmp(cb->f[0], "delpart") == 0)
-			delpart(cb->f[1]);
+			delpart(d, cb->f[1]);
 		else
 			error(Ebadctl);
 		poperror();
 		free(cb);
 		return n;
 	case Qdata:
-		return sdwrw(Opwrite, a, n, off);
+		if(d->ro)
+			error(Eperm);
+		return sdwrw(d, Opwrite, a, n, off);
 	}
-	if((ulong)c->qid.path >= Qpart){
-		pt = partof(c);
-		return sdwrw(Opwrite, a, partlen(pt, n, off), pt->start*Secsize + off);
+	if(QFILE(c->qid) >= Qpart){
+		if(d->ro)
+			error(Eperm);
+		pt = partof(d, c);
+		return sdwrw(d, Opwrite, a, partlen(pt, n, off), pt->start*Secsize + off);
 	}
 	error(Eperm);
 	return 0;
+}
+
+/* what the disks have been given goes to their files: before a reboot (arch.c) */
+void
+sdwflushall(void)
+{
+	Disk *d;
+
+	for(d = disks; d < disks+Ndisk; d++){
+		if(d->reg == nil || d->ro || !canqlock(d))
+			continue;
+		sdwio(d, Opflush, 0, 0);
+		qunlock(d);
+	}
 }
 
 Dev sdwdevtab = {

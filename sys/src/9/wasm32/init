@@ -1,22 +1,83 @@
 #!/bin/rc
-# the wasm32 machine's init (/boot/init), as 9front's: the time zone; the
-# console through kbdfs (the page's keyboard, #b/kbd, and #t/eia0); then
-# the user's login rc - glenda's profile starts ramfs for /tmp and, on a
-# terminal, rio -i riostart; rc goes on on the console when rio is done.
-# The mount points and factotum as 9front's bootrc makes them on a
-# terminal: the keys from secstore if there is one, else none yet - factotum
-# asks for one when it needs it (needkey, auth/factotum -g on the console);
-# glenda's home on the machine's disk
+# the wasm32 machine's init (/boot/init), as 9front's bootrc
+# (sys/src/9/boot/bootrc) on a terminal: the mount points, the console
+# through kbdfs (the page's keyboard, #b/kbd, and #t/eia0), factotum, the
+# disk's partitions (as diskparts); then the root.
+#
+# bootargs=local!DEVICE [flags] (plan9.ini's: the installer writes the
+# installed file system's), or with cdboot= set the distribution's CD the
+# page gave (#S/sdW1: the live image): its file server - by its type, as
+# fstype says - posted as /srv/boot, the root bound over the boot file
+# system, and 9front's own init from it (/$cputype/init -t: /lib/namespace,
+# termrc, the user's profile: rio; or init's own arguments, a command).
+#
+# No root: the boot file system alone, a terminal - glenda's home on the
+# machine's disk (/boot/disk), the keys from secstore if there is one, her
+# profile (rio -i riostart); rc goes on on the console when rio is done.
 cat /adm/timezone/local >/env/timezone
 mntgen -s slashn /n
 mntgen -s slashmnt /mnt
 mntgen -s mntexport /mnt/exportfs
-auth/factotum -n -sfactotum
-rc /boot/disk	# glenda's home on the machine's disk, if there is one
 aux/kbdfs -q -s cons /dev/eia0
+auth/factotum -n -sfactotum
+user=glenda
+d=/dev/sdW0
+if(test -e $d/data && ! test -e $d/fs && disk/edisk -p $d/data >$d/ctl >[2]/dev/null && test -e $d/plan9)
+	disk/prep -p $d/plan9 >$d/ctl >[2]/dev/null
+if(~ $#bootargs 0 && ! ~ $#cdboot 0 && test -e /dev/sdW1/data)
+	bootargs=local!/dev/sdW1/data
+
+fn root {
+	a=`{echo $bootargs | sed 's,^local!,,'}
+	if(! test -e $a(1)){
+		echo init: bootargs $bootargs: no $a(1)
+		return 1
+	}
+	t=`{fstype $a(1)}
+	switch($t){
+	case ''
+		echo init: $a(1): no file system it knows
+		return 1
+	case 9660
+		t=9660srv
+	case dos
+		t=dossrv
+	}
+	if(! test -x /bin/$t){
+		echo init: $a(1): $t, not in the boot file system
+		return 1
+	}
+	{$t -s -f $a <[0=1] &} | echo 0 >/srv/boot
+	if(! mount /srv/boot /root){
+		echo init: $a(1): $t: the root does not mount
+		return 1
+	}
+	test -x /root/$cputype/init
+}
+
+switch($bootargs){
+case local!*
+	if(root){
+		echo init: the root is $bootargs
+		rm -f '/env/fn#root' /env/a /env/t /env/d
+		# 9front's init from the root: its newns reads the root's /lib/namespace and makes the
+		# name space anew from #/ - the root /srv/boot on $rootdir, bound after /.  The root
+		# before the boot file system first, as bootrc's root takes its temporary one's place:
+		# the root's /lib/namespace, the boot file system's mount points under it
+		rootdir=/root
+		rootspec=()
+		bind -b /root /
+		# on the console (kbdfs's), as bootrc runs it; a command (init's arguments) in place of
+		# termrc and the profile
+		exec /$cputype/init -t $* </dev/cons >/dev/cons >[2=1]
+	}
+	echo init: the boot file system alone
+}
+rm -f '/env/fn#root'
+
+rc /boot/disk	# glenda's home on the machine's disk, if there is one
 # factotum's keys from secstore, if there is one (as 9front's bootrc on a terminal)
 rc /boot/secstore
-user=glenda
 home=/usr/glenda
 cd $home
 rc -l -i </dev/cons >/dev/cons >[2]/dev/cons

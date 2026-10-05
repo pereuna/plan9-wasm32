@@ -33,7 +33,7 @@ static	int	nents;
 static	int	aents;
 
 static char *mounts[] = {
-	"bin", "dev", "env", "srv", "n", "tmp", "proc", "fd", "net",
+	"bin", "dev", "env", "srv", "n", "tmp", "proc", "fd", "net", "root",
 	/* 9front's /mnt */
 	"mnt", "mnt/wsys", "mnt/term", "mnt/temp", "mnt/plumb", "mnt/acme", "mnt/exportfs", "mnt/keys", "mnt/web",
 };

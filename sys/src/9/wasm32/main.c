@@ -91,7 +91,8 @@ kcall(uintptr (*f)(va_list), ...)
 
 /*
  * C2b: init becomes a program, plan9.ini's init= (rc's words, quoted
- * as tokenize takes them): its root #R, the page's files; #c, #t (eia0)
+ * as tokenize takes them): its root #/ with #R, the page's files, over
+ * it; #c, #t (eia0)
  * in /dev, #e, #s; its files 0, 1, 2 #t/eia0.  Without one: the end of
  * C2a's test.
  */
@@ -124,13 +125,20 @@ inituser(void)
 		for(;;)
 			tsleep(&up->sleep, return0, nil, 1000000);
 	}
-	c = namec("#R", Atodir, 0, 0);
+	/*
+	 * the root is #/, as 9front's, with #R bound over it: a clean name space
+	 * (rfork RFCNAMEG: 9front's init, newns and /lib/namespace) is #/ alone
+	 */
+	c = namec("#/", Atodir, 0, 0);
 	pathclose(c->path);
 	c->path = newpath("/");
 	cclose(up->slash);
 	cclose(up->dot);
 	up->slash = c;
 	up->dot = cclone(c);
+	kcall(sysbind, "#R", "/", MREPL);
+	cclose(up->dot);
+	up->dot = namec("/", Atodir, 0, 0);	/* the union: #R */
 	kcall(sysbind, "#c", "/dev", MAFTER);
 	kcall(sysbind, "#t", "/dev", MAFTER);
 	kcall(sysbind, "#e", "/env", MREPL|MCREATE);

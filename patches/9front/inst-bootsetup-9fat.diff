@@ -1,0 +1,16 @@
+--- a/rc/bin/inst/bootsetup
++++ b/rc/bin/inst/bootsetup
+@@ -119,6 +119,13 @@
+ 		logprog cp /$cputype/$bootfile /n/9fat/$bootfile
+ 	}
+ 
++	# copy the machine's other boot files (wasm32: its kernel's boot
++	# file system and the page that is its firmware)
++	for(i in /$cputype/9fat/*){
++		if(test -f $i)
++			logprog cp $i /n/9fat/
++	}
++
+ 	# copy efi bootloader
+ 	for(i in /386/*.efi){
+ 		if(test -f $i) {

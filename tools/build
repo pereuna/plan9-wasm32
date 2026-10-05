@@ -4,7 +4,7 @@
 # programs), the boot file system (tools/bootfs), and the live image in
 # build/live - the page as the browser gets it from the server: its
 # firmware (kernel.html as index.html, its version in it; platform.js),
-# the kernel (9wasm32.wasm) and the boot file system (w3root.fs), each
+# the kernel (9wasm32.wasm) and the boot file system (9wasm32.fs), each
 # also gzipped (a server sends FILE.gz to a browser that takes it).
 #   PLAN9=... tools/build
 set -e
@@ -20,6 +20,6 @@ rm -rf "$live"; mkdir -p "$live"
 v="$(git -C "$root" describe --always --dirty 2>/dev/null || echo unknown) $(date -u +%Y-%m-%dT%H:%MZ)"
 sed "s|@VERSION@|$v|" "$w/kernel.html" >"$live/index.html"
 cp "$w/platform.js" "$tree/wasm32/9wasm32.wasm" "$live/"
-cp "$root/build/root.fs" "$live/w3root.fs"
+cp "$root/build/root.fs" "$live/9wasm32.fs"
 for f in "$live"/*; do gzip -9 -n -k "$f"; done
 echo "build: $live: $(cd "$live" && ls | grep -v '\.gz$' | tr '\n' ' ')"
