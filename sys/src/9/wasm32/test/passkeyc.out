@@ -1,0 +1,13 @@
+ticks in it: ok
+account password: 
+account password again: 
+auth/passkey: account erin made, its passkey and password
+erin
+erin-password-1
+erin
+erin-password-1
+auth/passkey: passkey: error not this site's origin
+auth/passkey: passkey: error not this site's passkey
+auth/passkey: passkey: error counter not above the last: a copied passkey?
+auth/passkey: passkey: error bad signature
+done

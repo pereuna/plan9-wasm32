@@ -1,0 +1,39 @@
+Fixes to 9front's own code, as patches against 9front-11952 (the source in
+subset/9front), to send upstream and to apply in the build VM - not in
+subset/9front, which is the VM's tree as it is (tools/subset/check).
+
+hjfs-auth.diff	hjfs/auth.c: validuser measured a name as n - p, which is
+		never USERLEN or more, so any name passed and the strcpy()s
+		after it overran name, lead (the stack) and memb (the heap);
+		lookupuid and ingroup could read one past the end of their
+		arrays when the uid was above every one (the binary search ends
+		with i == n).  2026-10-02.
+
+libc-9syscall-wasm32.diff
+		libc/9syscall/mkfile: wasm32 has no system call instruction;
+		its stubs are C, each a call of the platform's _trap with the
+		call's number and its arguments in memory (3c's convention),
+		compiled by $CC - as monolith/tools/build-libc3 makes them.
+		The other machines' assembler as it was.  2026-10-04.
+
+libthread-wasm32.diff
+		libthread/mkfile: wasm32's machine part is its own -
+		wasm32/wasm32.c, main.c, sched.c (contexts, not longjmp) - in
+		place of $objtype.c, main.c and sched.c; the others as they
+		were.  2026-10-04.
+
+Both are for the native build of wasm32 (docs/plan9-fork.md), with the
+fork's libc/wasm32/mkfile and libmp, libsec's empty wasm32/mkfiles.  wasm32
+is not in 9front's CPUS: mk installall builds the CPUS, and wasm32 is
+built by objtype=wasm32 mk install where it is wanted.
+
+How a patch reaches a build: the patched file goes into the fork, plan9/
+(the repo's changed 9front files in 9front's root layout, laid over the
+VM's /sys/src by tools/build.rc through tools/overlay), made from
+subset/9front's copy with the diff -
+  cp subset/9front/sys/src/cmd/hjfs/auth.c plan9/sys/src/cmd/hjfs/auth.c
+  cd plan9 && patch -p1 <patches/9front/hjfs-auth.diff
+hjfs-auth.diff: plan9/sys/src/cmd/hjfs/auth.c; tools/build.rc builds hjfs
+with it and tools/subset/mkusb puts that hjfs on the medium in place of
+the VM's.  2026-10-04.  tools/9front-2001 applies every patch to
+subset/9front and fails when the fork's copy is not the result.

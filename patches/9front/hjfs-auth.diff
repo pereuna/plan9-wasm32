@@ -1,0 +1,46 @@
+--- a/sys/src/cmd/hjfs/auth.c
++++ b/sys/src/cmd/hjfs/auth.c
+@@ -46,7 +46,7 @@
+ 	for(p = n; *p != 0; p++)
+ 		if((uchar) *p < ' ' || strchr("?=+-/:", *p) != nil)
+ 			return 0;
+-	return n - p < USERLEN;
++	return p - n < USERLEN;
+ }
+ 
+ static void
+@@ -243,7 +243,7 @@
+ lookupuid(Fs *fs, short uid)
+ {
+ 	User *u;
+-	int i, j, k;
++	int i, j, k, n;
+ 
+ 	u = fs->udata;
+ 	i = 0;
+@@ -254,6 +254,7 @@
+ 	}
+ 	if(j == 0)
+ 		return nil;
++	n = j;
+ 	while(i < j){
+ 		k = (i + j) / 2;
+ 		if(u[k].uid < uid)
+@@ -261,7 +262,7 @@
+ 		else
+ 			j = k;
+ 	}
+-	if(u[i].uid == uid)
++	if(i < n && u[i].uid == uid)
+ 		return &u[i];
+ 	return nil;
+ }
+@@ -293,7 +294,7 @@
+ 		else
+ 			j = k;
+ 	}
+-	if(g->memb[i] == uid)
++	if(i < g->nmemb && g->memb[i] == uid)
+ 		goto yes;
+ nope:
+ 	runlock(&fs->udatal);

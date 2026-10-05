@@ -1,0 +1,6 @@
+ticks in it: ok
+server: cuid glenda suid glenda, a 256-byte secret
+client: cuid glenda suid glenda, a 256-byte secret
+the secrets agree
+client: auth_proxy rpc write: needkey proto=dp9ik dom=plan2001 user=glenda user? !password?
+done

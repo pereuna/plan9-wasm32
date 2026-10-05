@@ -1,0 +1,11 @@
+ticks in it: ok
+account password: 
+account password again: 
+auth/passkey: passkey: error cancelled: the account without one, its password signs in
+auth/passkey: account carol made, its password (no passkey)
+status passkey 21: no passkey
+secstore password: 
+relay
+aux/seckeys: 1 keys from secstore
+key proto=dp9ik dom=plan2001 user=carol !password?
+done

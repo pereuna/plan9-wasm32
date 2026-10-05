@@ -1,0 +1,8 @@
+ticks in it: ok
+account password: 
+account password again: 
+auth/passkey: account dora made, its passkey and password
+relay
+aux/seckeys: 1 keys from secstore
+key proto=dp9ik dom=plan2001 user=dora !password?
+done

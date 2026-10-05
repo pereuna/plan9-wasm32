@@ -1,0 +1,10 @@
+ticks in it: ok
+before: net and srv
+computepool 0
+bind: #I: mount/attach disallowed
+bind: #s: mount/attach disallowed
+bind: #I: mount/attach disallowed
+/mnt/r/made
+bind: #I: mount/attach disallowed
+after: net and srv
+done

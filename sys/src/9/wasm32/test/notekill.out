@@ -1,0 +1,11 @@
+ticks in it: ok
+mem nohandler
+3 procs waiting in rendezvous
+after kill: 0 left
+fork handler
+3 procs waiting in rendezvous
+after kill: 0 left
+mem handler
+3 procs waiting in rendezvous
+after kill: 0 left
+done

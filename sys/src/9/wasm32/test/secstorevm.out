@@ -1,0 +1,7 @@
+ticks in it: ok
+put 
+secstore password: 
+secstore
+aux/seckeys: 1 keys from secstore
+key proto=dp9ik dom=plan2001 user=glenda !password?
+done

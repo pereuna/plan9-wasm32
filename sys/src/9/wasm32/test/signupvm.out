@@ -1,0 +1,13 @@
+ticks in it: ok
+account password: 
+account password again: 
+auth/passkey: account erin made, its passkey and password
+secstore
+aux/seckeys: 1 keys from secstore
+key proto=dp9ik dom=plan2001 user=erin !password?
+remote: erin
+home
+no network
+no srv
+rcpu status 
+done

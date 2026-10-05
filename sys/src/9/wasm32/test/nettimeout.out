@@ -1,0 +1,4 @@
+ticks in it: ok
+echo: write error: connection timed out
+status echo N: write error
+done

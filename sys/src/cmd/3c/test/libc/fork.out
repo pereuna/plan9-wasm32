@@ -1,0 +1,8 @@
+child: acc 15 local level0 d 0 heap cheap gcount 101
+parent: r 15005 heap pheap gcount 101, child said 'child done'
+grandchild
+child: grandchild said ''
+parent: child 2 said 'child 2 done'
+reaped one: ok
+reaped one: ok
+reaped one: ok

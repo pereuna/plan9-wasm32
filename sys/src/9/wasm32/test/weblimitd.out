@@ -1,0 +1,22 @@
+ticks in it: ok
+alice: 12000 KB > 10000: proc 102 killed (9000 KB)
+bob: 4 procs > 3
+bob: killed (4 procs)
+carol: 15000 KB > 10000: proc 301 killed (8000 KB)
+dave: all 19000 KB > 10000: proc 351 killed (9000 KB)
+/mnt/ram/proc/101/ctl pri 7
+/mnt/ram/proc/102/ctl kill
+/mnt/ram/proc/103/ctl pri 7
+/mnt/ram/proc/201/ctl kill
+/mnt/ram/proc/202/ctl kill
+/mnt/ram/proc/203/ctl kill
+/mnt/ram/proc/204/ctl kill
+/mnt/ram/proc/301/ctl kill
+/mnt/ram/proc/302/ctl pri 7
+/mnt/ram/proc/351/ctl kill
+/mnt/ram/proc/352/ctl pri 7
+/mnt/ram/proc/353/ctl pri 7
+/mnt/ram/proc/401/ctl
+/mnt/ram/proc/501/ctl
+/mnt/ram/nousers: file not found: '/mnt/ram/nousers': nobody limited
+done

@@ -1,0 +1,36 @@
+--- a/sys/src/libc/9syscall/mkfile	2026-10-04 15:35:10.141260394 +0000
++++ b/sys/src/libc/9syscall/mkfile	2026-10-04 15:35:10.153636625 +0000
+@@ -7,6 +7,21 @@
+ 		i=`{echo $I|tr A-Z a-z}
+ 		n=`{sed -n '/[ 	]'$I'[ 	]/s/.*	//p' sys.h}
+ 		if(~ $i (exits nsec)) i=_$i
++		if(~ $objtype wasm32){
++			# no system call instruction: the platform's _trap, the
++			# arguments in memory from the first (3c's calling convention)
++			{
++				echo 'typedef long long vlong;'
++				echo 'extern vlong _trap(int, void*);'
++				echo 'vlong'
++				echo $i'(void *a)'
++				echo '{'
++				echo '	return _trap('$n', &a);'
++				echo '}'
++			} > $i.c
++			$CC $CFLAGS $i.c
++		}
++		if not {
+ 		{switch($objtype){
+ 		case 68000 68020
+ 			echo TEXT $i'(SB)', 1, '$0'
+@@ -147,9 +162,11 @@
+ 			echo RET
+ 		}} > $i.s
+ 		$AS $i.s
++		}
+ 	}
+ 	ar vu /$objtype/lib/libc.a *.$O
+ 	rm -f *.$O *.s
++	if(~ $objtype wasm32) rm -f *.c
+ 
+ nuke clean:V:
+ 	rm -f *.[$OS]

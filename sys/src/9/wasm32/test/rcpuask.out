@@ -1,0 +1,22 @@
+ticks in it: ok
+
+!Adding key: dom=plan2001 proto=dp9ik
+user[glenda]: 
+password: 
+!
+remote: service cpu
+wasm32
+/mnt/term/boot/app
+/mnt/term/boot/console
+/mnt/term/boot/disk
+/mnt/term/boot/factotum
+/mnt/term/boot/init
+/mnt/term/boot/install
+/mnt/term/boot/login
+/mnt/term/boot/rconnect.app
+/mnt/term/boot/secstore
+the terminal draws
+remote done
+rcpu status 
+key proto=dp9ik dom=plan2001 user=glenda !password?
+done

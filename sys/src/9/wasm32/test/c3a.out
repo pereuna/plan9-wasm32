@@ -1,0 +1,10 @@
+ticks in it: ok
+note: alarm
+sleep: -1 interrupted
+note: alarm
+jumped out of the handler
+note: alarm
+again: -1 interrupted
+child got 11
+parent got 22, child reaped
+no handler: c3a 6: alarm

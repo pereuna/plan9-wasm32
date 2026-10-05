@@ -1,0 +1,5 @@
+child got 'msg0', child-local
+child got 'msg1', child-local
+child got 'msg2', child-local
+child: *gstack 107
+parent: shared 33 heap C parent-frame mine 7, child said 'child done'

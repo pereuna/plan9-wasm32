@@ -1,0 +1,7 @@
+ticks in it: ok
+server got: hello from the client
+client got: hello from the server
+client: 1048576 bytes, sha256 9E277E95D2030F16
+server: 1048576 bytes, sha256 9E277E95D2030F16
+wrong key: refused
+done

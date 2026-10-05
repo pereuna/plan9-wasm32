@@ -1,0 +1,30 @@
+#!/bin/rc
+# the wasm32 machine's init (/boot/init), as 9front's: the time zone; the
+# console through kbdfs (the page's keyboard, #b/kbd, and #t/eia0); then
+# the user's login rc - glenda's profile starts ramfs for /tmp and, on a
+# terminal, rio -i riostart; rc goes on on the console when rio is done.
+# The mount points and factotum as 9front's bootrc makes them on a
+# terminal: the keys from secstore if there is one, else none yet - factotum
+# asks for one when it needs it (needkey, auth/factotum -g on the console);
+# glenda's home on the machine's disk
+cat /adm/timezone/local >/env/timezone
+mntgen -s slashn /n
+mntgen -s slashmnt /mnt
+mntgen -s mntexport /mnt/exportfs
+auth/factotum -n -sfactotum
+rc /boot/disk	# glenda's home on the machine's disk, if there is one
+aux/kbdfs -q -s cons /dev/eia0
+# factotum's keys: the site's login (accounts and passkeys, Plan2001's
+# /boot/login) if it offers one ($login), else secstore if there is one
+if(~ $login 1 && test -r /boot/login)
+	rc /boot/login </dev/cons >/dev/cons >[2]/dev/cons
+if not
+	rc /boot/secstore
+user=glenda
+home=/usr/glenda
+cd $home
+# an app's origin (app=, from the page: BootInfo's config): the app on the
+# CPU server, this machine its terminal (/boot/app, Plan2001's; D7)
+if(! ~ $#app 0 && ! ~ $app term && test -r /boot/app)
+	exec rc /boot/app </dev/cons >/dev/cons >[2]/dev/cons
+rc -l -i </dev/cons >/dev/cons >[2]/dev/cons

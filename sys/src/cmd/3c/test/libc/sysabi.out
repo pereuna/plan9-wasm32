@@ -1,0 +1,17 @@
+create ok
+write 16
+seek set 4
+read 3 456
+seek cur 9
+read 2 9a
+pread 4 abcd
+pwrite 2
+seek end 14
+read 2 ef
+pread all 16 0XY3456789abcdef
+seek far 8589934592
+close 0
+close again -1
+open missing failed
+remove 0
+remove again failed

@@ -1,0 +1,6 @@
+</sys/src/mkfile.proto
+
+CC=3c
+LD=3l
+O=3
+AS=3a

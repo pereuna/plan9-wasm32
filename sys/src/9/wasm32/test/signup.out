@@ -1,0 +1,12 @@
+ticks in it: ok
+account password: 
+account password again: 
+auth/passkey: account alice made, its passkey and password
+relay
+aux/seckeys: 1 keys from secstore
+key proto=dp9ik dom=plan2001 user=alice !password?
+secstore password: 
+relay
+aux/seckeys: 1 keys from secstore
+key proto=dp9ik dom=plan2001 user=alice !password?
+done

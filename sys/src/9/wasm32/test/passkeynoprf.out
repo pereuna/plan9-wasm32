@@ -1,0 +1,14 @@
+ticks in it: ok
+account password: 
+account password again: 
+auth/passkey: passkey: no PRF here: it names the account, the password is typed
+auth/passkey: account gus made, its password and a passkey that names it
+wrap	-
+password for gus: 
+gus
+gus-password-12
+account password: 
+auth/passkey: passkey: no PRF here: it names the account, the password is typed
+auth/passkey: a passkey for gus
+      2
+done

@@ -1,0 +1,30 @@
+</$objtype/mkfile
+
+TARG=3c
+OFILES=\
+	cgen.$O\
+	enam.$O\
+	list.$O\
+	machcap.$O\
+	sgen.$O\
+	swt.$O\
+	txt.$O\
+	pgen.$O\
+	pswt.$O\
+
+HFILES=\
+	gc.h\
+	3.out.h\
+	../cc/cc.h\
+
+LIB=../cc/cc.a$O
+
+BIN=/$objtype/bin
+</sys/src/cmd/mkone
+
+$LIB:
+	cd ../cc
+	mk install
+
+%.$O: ../cc/%.c
+	$CC $CFLAGS -I. ../cc/$stem.c

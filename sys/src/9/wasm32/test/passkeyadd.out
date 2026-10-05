@@ -1,0 +1,15 @@
+ticks in it: ok
+account password: 
+account password again: 
+auth/passkey: passkey: error cancelled: the account without one, its password signs in
+auth/passkey: account fred made, its password (no passkey)
+account password: 
+auth/passkey: signup: error wrong password
+account password: 
+auth/passkey: a passkey for fred
+      1
+fred
+fred-password-1
+account password: 
+auth/passkey: signup: error no such account
+done

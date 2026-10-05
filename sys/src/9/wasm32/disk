@@ -1,0 +1,79 @@
+#!/bin/rc
+# the wasm32 machine's disk (/boot/disk, from /boot/init; D6): #S/sdW0,
+# a file in the origin's OPFS (devsdw.c, platform.js), with hjfs on it
+# (/srv/disk, its console /srv/disk.cmd).  glenda's home is the disk's
+# /usr/glenda, all of it, bound over the root's: what she makes, at any
+# depth, is there after the page is loaded again.  As newuser gives a new
+# user her files, the root's /usr/glenda fills in what the disk's lacks -
+# a new disk gets all of it, an older one what came since; nothing she
+# has is replaced.  A new disk is reamed and given /usr/glenda through
+# hjfs's console.  hjfs syncs every 10 s by itself; here every 2 s, so a
+# closed page loses at most that (the disk Worker writes the file within
+# a quarter of a second of the last write).  No disk (another tab has
+# it, or ?disk=0): the root's /usr/glenda only.  A system installed on
+# the disk (9front's tree for wasm32) is bound in with the root's.
+
+# what $2 lacks of the tree $1, copied; nothing in $2 replaced.  Hers to
+# change: the root's files are all 0555, the copies 664 (775 in bin), as
+# newuser's
+fn skel {
+	for(f in `{ls $1}){
+		n=`{basename $f}
+		if(test -d $f){
+			if(! test -d $2/$n){
+				mkdir $2/$n
+				chmod 775 $2/$n
+			}
+			skel $f $2/$n
+		}
+		if not if(! test -e $2/$n){
+			cp $f $2/$n
+			if(~ $2 */bin */bin/*)
+				chmod 775 $2/$n
+			if not
+				chmod 664 $2/$n
+		}
+	}
+}
+
+if(test -e /dev/sdW0/data){
+	# a partitioned disk (9front's: GPT, esp, plan9 with nvram and fs - an installed system's,
+	# Plan2001's /boot/install): its partitions as 9front's diskparts makes them, hjfs on fs;
+	# else hjfs on all of it
+	d=/dev/sdW0
+	if(! test -e $d/fs && disk/edisk -p $d/data >$d/ctl >[2]/dev/null && test -e $d/plan9)
+		disk/prep -p $d/plan9 >$d/ctl >[2]/dev/null
+	fs=$d/data
+	test -e $d/fs && fs=$d/fs
+	# hjfs already serving it (this run again, e.g. after /boot/install): not started, never reamed
+	if(! test -e /srv/disk && ! hjfs -n disk -f $fs >[2]/dev/null){
+		echo disk: a new disk, hjfs -r
+		hjfs -r -n disk -f $fs >[2]/dev/null
+		echo create /usr sys sys 775 d >>/srv/disk.cmd
+		echo create /usr/glenda glenda glenda 775 d >>/srv/disk.cmd
+	}
+	if(mount -c /srv/disk /n/disk){
+		for(i in 1 2 3 4 5 6 7 8 9 10)
+			test -d /n/disk/usr/glenda || sleep 1
+		if(test -d /n/disk/usr/glenda){
+			skel /usr/glenda /n/disk/usr/glenda
+			bind -c /n/disk/usr/glenda /usr/glenda
+			echo 'disk: glenda''s home is kept on this browser''s disk'
+			# a system installed on the disk (a 9front tree for wasm32: Plan2001's
+			# /boot/install): what the root has not (/sys, /wasm32, /acme ...) the
+			# disk's, its programs and /lib before the root's, its rc's after
+			if(test -d /n/disk/wasm32/bin){
+				bind -a /n/disk /
+				bind -b /n/disk/wasm32/bin /bin
+				test -d /n/disk/rc/bin && bind -a /n/disk/rc/bin /bin
+				test -d /n/disk/lib && bind -b /n/disk/lib /lib
+				echo 'disk: installed on it: '^`{ls /n/disk/sys/lib/dist >[2]/dev/null}
+			}
+			# only while hjfs is there (it takes /srv/disk away when it halts): rc's >> would
+			# make a /srv/disk.cmd of its own, and another hjfs could not post its console
+			@{ rfork n; while(sleep 2) test -e /srv/disk && echo sync >>/srv/disk.cmd } >[2]/dev/null &
+		}
+	}
+}
+if not
+	echo 'disk: none (another tab of this site has it?): nothing is kept'

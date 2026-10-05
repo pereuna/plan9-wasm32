@@ -1,0 +1,60 @@
+CONF=wasm32
+CONFLIST=wasm32
+
+objtype=wasm32
+</$objtype/mkfile
+p=9
+
+# the browser's machine (docs/boot-abi-wasm32.md): no config file and no
+# mkdevc - devtab.c is the configuration - and no boot loader to make; the
+# page (platform.js, kernel.html) loads 9wasm32.wasm and its root
+# (root.fs, monolith/tools/build-bin3).  monolith/tools/build-9wasm32
+# builds the same from Linux.
+
+# what of port/ wasm32 uses: proc.c, devproc.c, sysproc.c and cache.c are
+# its own
+PORTFILES=alarm alloc allocb auth chan dev devcons devdraw devdup devenv\
+	devmnt devmouse devpipe devroot devsrv devtls devuart mul64fract parse\
+	pgrp portclock print qio qlock sysfile taslock tod xalloc\
+	bootargs bootinfo
+
+ARCHFILES=arch bootarch cache clock devkbd devproc devrootfs devsdw devtab devwebauthn\
+	devwsnet main proc screen sysproc trap uartwasm32
+
+OBJ=${PORTFILES:%=%.$O} ${ARCHFILES:%=%.$O}
+
+LIB=\
+	/$objtype/lib/libmemlayer.a\
+	/$objtype/lib/libmemdraw.a\
+	/$objtype/lib/libdraw.a\
+	/$objtype/lib/libsec.a\
+	/$objtype/lib/libmp.a\
+	/$objtype/lib/libc.a\
+
+CFLAGS=-FVw -I. -I../port
+
+all:V:	$p$CONF.wasm
+
+$p$CONF.wasm:	$OBJ $LIB
+	$LD -k -E main -o $target $OBJ $LIB
+
+install:V:	$p$CONF.wasm
+	cp $p$CONF.wasm /$objtype/
+
+# port/'s by name: the local rule would be ambiguous for the names both have
+^(alarm|alloc|allocb|auth|chan|dev|devcons|devdraw|devdup|devenv|devmnt|devmouse|devpipe|devroot|devsrv|devtls|devuart|mul64fract|parse|pgrp|portclock|print|qio|qlock|sysfile|taslock|tod|xalloc|bootargs|bootinfo)\.$O:R:	../port/\1.c
+	$CC $CFLAGS ../port/$stem1.c
+
+%.$O:	%.c
+	$CC $CFLAGS $stem.c
+
+%.$O:	/$objtype/include/u.h ../port/lib.h mem.h dat.h fns.h io.h ../port/error.h ../port/portdat.h ../port/portfns.h platform.h
+
+devdraw.$O devmouse.$O screen.$O:	screen.h /sys/include/draw.h /sys/include/memdraw.h
+proc.$O devroot.$O:	errstr.h
+alloc.$O devproc.$O:	/sys/include/pool.h
+devmnt.$O:	/sys/include/fcall.h
+bootargs.$O bootinfo.$O bootarch.$O main.$O:	/sys/include/bootinfo.h
+
+clean:V:
+	rm -f *.[$OS] $p$CONF.wasm

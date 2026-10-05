@@ -1,0 +1,42 @@
+--- a/sys/src/libthread/mkfile	2026-10-04 15:41:35.505589919 +0000
++++ b/sys/src/libthread/mkfile	2026-10-04 15:42:12.758077333 +0000
+@@ -2,8 +2,12 @@
+ 
+ LIB=/$objtype/lib/libthread.a
+ 
++# the machine's part: $objtype.c, main.c, sched.c - wasm32's own in wasm32/
++# (contexts, not longjmp; no fork of the stack)
++MACHOFILES=`{if(~ $objtype wasm32) echo wasm32.$O wasm32main.$O wasm32sched.$O; if not echo $objtype.$O main.$O sched.$O}
++
+ OFILES=\
+-	$objtype.$O\
++	$MACHOFILES\
+ 	channel.$O\
+ 	chanprint.$O\
+ 	create.$O\
+@@ -23,11 +27,9 @@
+ 	ioflush.$O\
+ 	kill.$O\
+ 	lib.$O\
+-	main.$O\
+ 	note.$O\
+ 	ref.$O\
+ 	rendez.$O\
+-	sched.$O\
+ 
+ CFILES=\
+ 	386.c\
+@@ -70,6 +72,13 @@
+ spim.$O:	mips.c
+ 	$CC $CFLAGS -o $target mips.c
+ 
++wasm32.$O:	wasm32/wasm32.c
++	$CC $CFLAGS -I. -o $target wasm32/wasm32.c
++wasm32main.$O:	wasm32/main.c
++	$CC $CFLAGS -I. -o $target wasm32/main.c
++wasm32sched.$O:	wasm32/sched.c
++	$CC $CFLAGS -I. -o $target wasm32/sched.c
++
+ </sys/src/cmd/mksyslib
+ 
+ $O.tprimes: tprimes.$O $LIB

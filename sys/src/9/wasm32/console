@@ -1,0 +1,8 @@
+#!/bin/rc
+# the wasm32 machine's serial console (/boot/console; its tests): the
+# time zone; the console - the page's keyboard (#b/kbd) and #t/eia0 -
+# through kbdfs (line editing, echo, DEL the interrupt), and an
+# interactive rc on it
+cat /adm/timezone/local >/env/timezone
+aux/kbdfs -q -s cons /dev/eia0
+rc -i </dev/cons >/dev/cons >[2]/dev/cons
