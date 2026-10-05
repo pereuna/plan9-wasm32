@@ -1,0 +1,20 @@
+#!/bin/rc
+# factotum's keys from secstore (/boot/secstore, from /boot/init), as
+# 9front's bootrc loads them: if $secstore or $auth (BootInfo's config)
+# names a server, its password asked on the console, again after a wrong
+# one, none (an empty line) to go on without.  With the machine's disk
+# (/boot/disk) aux/seckeys keeps a copy of the keys in glenda's home,
+# encrypted with the same password (aescbc), and takes them from it when
+# there is no secstore (docs/architecture.md, "Avainten paikka")
+copy=()
+if(test -d /n/disk/usr/glenda/lib)
+	copy=/usr/glenda/lib/factotum.aes
+if(test -x /bin/aux/seckeys && test -f /mnt/factotum/ctl)
+	aux/seckeys $copy </dev/cons >/dev/cons >[2]/dev/cons
+if not {
+	x=secstore
+	if(~ $#$x 0) x=auth
+	if(! ~ $#$x 0 && test -x /bin/auth/secstore && test -f /mnt/factotum/ctl)
+		auth/secstore -G factotum -s^$$x </dev/cons >/mnt/factotum/ctl >[2]/dev/cons
+}
+status=''

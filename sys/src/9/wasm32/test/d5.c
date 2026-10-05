@@ -2,7 +2,7 @@
 #include <libc.h>
 
 /*
- * #W, the page's WebAuthn (devwebauthn.c, docs/webauthn.md), with the test's
+ * #ω, the page's WebAuthn (devwebauthn.c, docs/webauthn.md), with the test's
  * browser's virtual authenticator (tools/test-wasmapp WEBAUTHN: its PRF,
  * and the page's buttons clicked): a passkey for glenda made, then got -
  * its PRF output 32 bytes, the same for the same salt and another for
@@ -70,8 +70,8 @@ ask(char *fmt, ...)
 	va_start(arg, fmt);
 	vsnprint(req, sizeof req, fmt, arg);
 	va_end(arg);
-	if((fd = open("#W/webauthn", ORDWR)) < 0)
-		sysfatal("#W/webauthn: %r");
+	if((fd = open("#ω/webauthn", ORDWR)) < 0)
+		sysfatal("#ω/webauthn: %r");
 	if(write(fd, req, strlen(req)) < 0){
 		ans = smprint("write error: %r");
 		close(fd);

@@ -14,17 +14,9 @@ mntgen -s mntexport /mnt/exportfs
 auth/factotum -n -sfactotum
 rc /boot/disk	# glenda's home on the machine's disk, if there is one
 aux/kbdfs -q -s cons /dev/eia0
-# factotum's keys: the site's login (accounts and passkeys, Plan2001's
-# /boot/login) if it offers one ($login), else secstore if there is one
-if(~ $login 1 && test -r /boot/login)
-	rc /boot/login </dev/cons >/dev/cons >[2]/dev/cons
-if not
-	rc /boot/secstore
+# factotum's keys from secstore, if there is one (as 9front's bootrc on a terminal)
+rc /boot/secstore
 user=glenda
 home=/usr/glenda
 cd $home
-# an app's origin (app=, from the page: BootInfo's config): the app on the
-# CPU server, this machine its terminal (/boot/app, Plan2001's; D7)
-if(! ~ $#app 0 && ! ~ $app term && test -r /boot/app)
-	exec rc /boot/app </dev/cons >/dev/cons >[2]/dev/cons
 rc -l -i </dev/cons >/dev/cons >[2]/dev/cons
