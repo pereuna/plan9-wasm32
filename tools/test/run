@@ -22,7 +22,8 @@
 #   an rcpu relay): dp9ik, dp9iknoas, nettimeout, netre, rcpu, rcpuask,
 #   secstore, seckeys, sendq (backpressure)
 # - the page's plan9.ini: pageini
-# - the install (build/dist: tools/dist): install, the live image, inst/start, the boot from the disk
+# - the install (build/dist: tools/dist): install, the live image, inst/start, the boot from the disk;
+#   isofile, the ISO from this computer (?iso=file)
 #   PLAN9=... tools/test/run [NAME...]	all without NAMEs
 set -e -o pipefail
 here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
@@ -189,6 +190,17 @@ if want install $names; then
 			run install '["/bin/rc", "/boot/init", ". /rc/bin/termrc; ramfs; inst/start"]' "$inst" '&noreboot=1&boot=disk'
 	else
 		echo "test: install: skipped (no build/dist: PLAN9=... tools/dist)"
+	fi
+fi
+# the distribution's ISO on this computer (?iso=file: the page's chooser, given the small ISO as a person
+# chooses it): sdW1 read from the File, nothing downloaded, its 9660 the machine's
+if want isofile $names; then
+	if [ -d "$root/build/dist/root" ]; then
+		[ -e "$root/build/test/dist/dist.iso" ] || "$here/iso" >/dev/null
+		SITE=$root/build/test/dist ISOFILE=$root/build/test/dist/dist.iso \
+			run isofile '["/bin/rc", "-c", "{9660srv -s -f /dev/sdW1/data <[0=1] &} | echo 0 >/srv/iso; mount /srv/iso /root; ls -d /root/dist/9front /root/wasm32/9fat/index.html; sed -n 1p /dev/sdW1/ctl; echo done"]' '[]' '&iso=file'
+	else
+		echo "test: isofile: skipped (no build/dist: PLAN9=... tools/dist)"
 	fi
 fi
 # no auth server (the gateway refuses): no tickets

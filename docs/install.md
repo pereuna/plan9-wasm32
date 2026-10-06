@@ -22,7 +22,8 @@ plan9.ini there says `cdboot=yes` and `iso=plan9-wasm32.iso`.  The page
 (the firmware) makes the ISO the machine's read-only disk `#S/sdW1`,
 read from the server with HTTP range requests; or, with `?iso=file`, a
 copy of the ISO on the person's own computer, chosen on the page (read
-with FileReaderSync, nothing downloaded).  `/boot/init` does what
+with FileReaderSync, nothing downloaded; the server gives the page, the
+kernel and its boot file system only) - tools/test/run's isofile.  `/boot/init` does what
 9front's bootrc does with `cdboot`: the CD's file system (9660srv) is the
 root, and 9front's own init runs from it - `/lib/namespace`, termrc,
 glenda's profile, rio.  The live system is a guest: nothing is written.
