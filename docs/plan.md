@@ -63,4 +63,7 @@ own; "9front" here means that project.  It is installed and booted as
    -r reboots; tools/test/run's install does it all with a small ISO.
 5. The loader page (done, 2026-10-06): the page boots the disk's FAT -
    its own firmware, kernel and plan9.ini - else the live image.
-6. plan2001.com/plan9-wasm32/: the live image and the distribution.
+6. https://plan2001.com/plan9-wasm32/ (done, 2026-10-06): the live image
+   and the distribution's ISO (720 MB, read with range requests); it
+   boots to rio over the Internet.  ?iso=file boots a copy of the ISO on
+   one's own computer instead.

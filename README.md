@@ -38,6 +38,10 @@ built for wasm32 (`docs/install.md`):
 `?iso=file` on the page boots a copy of the ISO on your own computer
 instead of the server's.
 
+Try it: https://plan2001.com/plan9-wasm32/ (a live image, as 9front's ISO:
+`inst/start` installs onto the browser's disk; `?iso=file` reads a copy of
+the ISO on your own computer).
+
 Status and plan: docs/plan.md.
 
 ## Testing
