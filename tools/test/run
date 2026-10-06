@@ -22,6 +22,7 @@
 #   an rcpu relay): dp9ik, dp9iknoas, nettimeout, netre, rcpu, rcpuask,
 #   secstore, seckeys, sendq (backpressure)
 # - the page's plan9.ini: pageini
+# - the install (build/dist: tools/dist): install, the live image, inst/start, the boot from the disk
 #   PLAN9=... tools/test/run [NAME...]	all without NAMEs
 set -e -o pipefail
 here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
@@ -173,6 +174,22 @@ if want dp9ik $names || want netre $names || want rcpu $names || want rcpuask $n
 		'[["secstore password: ", "spassword\n"], ["secstore password: ", "wrong\n"], ["secstore password: ", "spassword\n"]]'
 	kill $aspid; trap - EXIT
 	unset GATEWAY
+fi
+# installed as 9front is (docs/install.md): the live image of a small distribution (tools/test/iso:
+# what the installer, termrc and rio run), inst/start on the console - hjfs, GPT, prep's 9fat, the
+# distribution copied, the time zone, bootsetup - and fshalt -r; then the page again: it boots from
+# the disk's 9fat with the disk's own firmware (the loader), the root the installed hjfs, and fshalt
+# -r ends it.  Skipped without the distribution (PLAN9=... tools/dist)
+if want install $names; then
+	if [ -d "$root/build/dist/root" ]; then
+		"$here/iso" >/dev/null
+		inst='[["Task to do", "\n"], ["File system", "hjfs\n"], ["Task to do", "\n"], ["Disk to partition", "sdW0\n"], ["mbr or gpt", "gpt\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["to subdivide", "\n"], ["esp as 9fat", "\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["Hjfs partition", "\n"], ["cache (MB)", "\n"], ["Ream the filesystem", "\n"], ["Task to do", "\n"], ["Task to do", "\n"], ["Distribution disk", "\n"], ["Location of archives", "\n"], ["Task to do", "\n"], ["Task to do", "\n"], ["Time Zone", "EET\n"], ["Task to do", "\n"], ["FAT partition", "/dev/sdW0/9fat\n"], ["EFI system partition", "no\n"], ["Task to do", "\n"]]'
+		SITE=$root/build/test/dist SENDWAIT=1800 HALTWAIT=1800 EXPECTJS="window.plan9firmware === 'disk'" \
+			THEN='["/bin/rc", "/boot/init", "echo bootargs $bootargs; ls -d /dist/9front /wasm32/bin/hjfs; sed 1q /adm/timezone/local; fshalt -r >/dev/null >[2=1]"]' \
+			run install '["/bin/rc", "/boot/init", ". /rc/bin/termrc; ramfs; inst/start"]' "$inst" '&noreboot=1&boot=disk'
+	else
+		echo "test: install: skipped (no build/dist: PLAN9=... tools/dist)"
+	fi
 fi
 # no auth server (the gateway refuses): no tickets
 want dp9iknoas $names && GATEWAY=18098 HALTWAIT=120 run dp9iknoas "$(rcjson "mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; d3 -p cirno; echo done")"

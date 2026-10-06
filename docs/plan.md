@@ -56,15 +56,11 @@ own; "9front" here means that project.  It is installed and booted as
    (wasmapp), a stand-in for the network (authsrv: dp9ik, secstore, an
    rcpu relay), the test programs by mk; the page takes plan9.ini from
    the server.
-4. The live image and inst/start for wasm32 (9front's installer: the
-   disk's layout, copydist from the distribution disk, bootsetup).  In
-   progress (2026-10-06, docs/install.md): tools/dist makes the ISO and the
-   live image; the live image boots from it as 9front's ISO does (9660
-   root, 9front's init, termrc, rio).  inst/start on the console: configfs
-   (hjfs), partdisk, prepdisk, mountfs, confignet, mountdist, copydist (the
-   whole distribution onto the OPFS disk), ndbsetup and tzsetup done.
-   Left: bootsetup, finish (fshalt -r, the page reloads), the boot from the
-   disk, an install test in tools/test/run (a small test ISO).
-5. The loader page: boot from the disk's FAT (its firmware, kernel and
-   plan9.ini), else the live image.
+4. The live image and inst/start (done, 2026-10-06; docs/install.md):
+   tools/dist makes the ISO and the live image; it boots as 9front's ISO
+   does (9660 root, 9front's init, termrc, rio); inst/start installs onto
+   the OPFS disk (hjfs, GPT, prep's 9fat, copydist, bootsetup) and fshalt
+   -r reboots; tools/test/run's install does it all with a small ISO.
+5. The loader page (done, 2026-10-06): the page boots the disk's FAT -
+   its own firmware, kernel and plan9.ini - else the live image.
 6. plan2001.com/plan9-wasm32/: the live image and the distribution.

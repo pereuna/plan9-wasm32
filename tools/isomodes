@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Plan 9's modes of an ISO 9660 image's files (9front's mk9660 -9: the
+Plan 9 directory extension after each record's name - its name, uid, gid
+and mode), put on a copy of the image's files: 7z, which unpacks the
+release, knows no Plan 9 modes (its rc scripts would not be executable).
+  tools/isomodes ISO DIR
+"""
+import os, struct, sys
+
+iso, top = sys.argv[1:]
+f = open(iso, 'rb')
+def sector(n, count=1):
+	f.seek(n * 2048)
+	return f.read(2048 * count)
+pvd = sector(16)
+if pvd[1:6] != b'CD001' or pvd[0] != 1:
+	sys.exit('isomodes: %s: no primary volume descriptor' % iso)
+if not pvd[8:40].startswith(b'PLAN 9'):
+	sys.exit('isomodes: %s: not a Plan 9 image (mk9660 -9)' % iso)
+
+def records(ext, size):
+	data = sector(ext, (size + 2047) // 2048)[:size]
+	o = 0
+	while o < len(data):
+		n = data[o]
+		if n == 0:	# the rest of this sector is padding
+			o = (o // 2048 + 1) * 2048
+			continue
+		yield data[o:o + n]
+		o += n
+
+def walk(ext, size, path, out):
+	for r in records(ext, size):
+		ln = r[32]
+		raw = r[33:33 + ln]
+		if raw in (b'\0', b'\1'):
+			continue
+		s = 33 + ln
+		if s & 1:
+			s += 1
+		nl = r[s]
+		name = r[s + 1:s + 1 + nl].decode('utf-8') if nl else raw.decode('latin1').split(';')[0].lower()
+		s += 1 + nl
+		s += 1 + r[s]	# uid
+		s += 1 + r[s]	# gid
+		if s & 1:
+			s += 1
+		mode = struct.unpack('<I', r[s:s + 4])[0]
+		p = path + '/' + name
+		out[p] = mode
+		if r[25] & 2:
+			walk(struct.unpack('<I', r[2:6])[0], struct.unpack('<I', r[10:14])[0], p, out)
+
+modes = {}
+root = pvd[156:156 + 34]
+walk(struct.unpack('<I', root[2:6])[0], struct.unpack('<I', root[10:14])[0], '', modes)
+n = 0
+for p, m in modes.items():
+	q = top + p
+	if os.path.lexists(q) and not os.path.islink(q):
+		os.chmod(q, m & 0o777 | (0o700 if m & 0x80000000 else 0))
+		n += 1
+print('isomodes: %d of %d files' % (n, len(modes)))

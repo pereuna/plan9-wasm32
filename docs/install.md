@@ -50,10 +50,28 @@ glenda's profile, rio.  The live system is a guest: nothing is written.
 
 ## Booting from the disk
 
-The page looks at the disk first, as a PC's firmware does
-(`platform.js`'s `diskboot`): the GPT, then 9fat in the plan9 partition
-(prep's table) or the esp, and on it plan9.ini, the kernel and its boot
-file system.  `/boot/init` then mounts `bootargs`' file system (hjfs on
-`/dev/sdW0/fs`) as the root and runs 9front's init from it.  `?boot=net`
-boots the live image again (to install anew); `?disk=0` boots without the
-disk.
+The page at the server is the loader.  It looks at the disk first, as a
+PC's firmware does (`platform.js`'s `diskboot`): the GPT, then 9fat in the
+plan9 partition (prep's table) or the esp, and on it plan9.ini, the kernel
+and its boot file system.  If the FAT has its own firmware (`index.html`,
+`platform.js`: bootsetup put them there), the page gives the machine over
+to it - the disk's page and platform run the disk's kernel - so the system
+is the disk's until it is installed again (`window.plan9firmware` is
+`disk` there).
+
+`/boot/init` then mounts `bootargs`' file system (hjfs on `/dev/sdW0/fs`)
+as the root and runs 9front's init from it.  The root's file server runs
+in a name space of its own: the root, bound before `/` for 9front's init,
+is not in the server's, or its halt (fshalt) would walk through itself.
+
+`?boot=net` boots the live image again (to install anew); `?disk=0` boots
+without the disk.
+
+## The test
+
+`tools/test/run install` (with `build/dist` there): `tools/test/iso` makes a
+small distribution (what the installer, termrc and rio run) and its live
+image; inst/start is answered on the console, `fshalt -r` reboots, and the
+page boots from the disk with the disk's firmware, the root the installed
+hjfs.  `PROFILE=dir` keeps the browser's profile, and with it the disk,
+between runs of `tools/test/wasmapp`.

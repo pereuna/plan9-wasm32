@@ -28,6 +28,7 @@ build/test/site) with init's arguments, until the machine halts
   PAGEHOST=localhost                       the page from this host (WebAuthn
                                            takes no IP address for its rp)
   GATEWAY=PORT                             tools/serve's relay to it (tools/test/authsrv)
+  PROFILE=dir                              the browser's profile there, kept: its disk too
   PLAN9INI='a=b'                           the page's plan9.ini
 """
 import base64, json, os, re, shutil, socket, struct, subprocess, sys, tempfile, time, urllib.parse, urllib.request
@@ -131,7 +132,7 @@ SIG = """(() => { const c = document.getElementById('screen');
 def main():
 	name = sys.argv[1] if len(sys.argv) > 1 else 'kernel'
 	secs = float(sys.argv[2]) if len(sys.argv) > 2 else 8
-	tmp = tempfile.mkdtemp()
+	tmp = os.environ.get('PROFILE') or tempfile.mkdtemp()	# PROFILE=dir: the browser's profile kept (its OPFS: the machine's disk)
 	srv = subprocess.Popen([os.path.join(root, 'tools/serve'), '-d', os.environ.get('SITE') or os.path.join(out, 'site'),
 		'-g', os.environ.get('GATEWAY') or '17080', str(HTTP)],
 		stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -374,7 +375,8 @@ def main():
 			chrome.wait(10)
 		except Exception:
 			pass
-		shutil.rmtree(tmp, ignore_errors=True)	# Chromium's profile: 12 MB each, /tmp is small
+		if not os.environ.get('PROFILE'):
+			shutil.rmtree(tmp, ignore_errors=True)	# Chromium's profile: 12 MB each, /tmp is small
 
 
 main()

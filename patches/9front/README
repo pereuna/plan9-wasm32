@@ -31,8 +31,9 @@ inst-bootsetup-9fat.diff
 		rc/bin/inst/bootsetup: the machine's other boot files,
 		/$cputype/9fat/*, onto the boot FAT with the kernel and
 		plan9.ini (wasm32: the kernel's boot file system and the page
-		that is its firmware; no other machine has the directory).
-		2026-10-06.
+		that is its firmware; no other machine has the directory);
+		and not into plan9.ini what the firmware says each boot
+		(wasm32's *sdWn=, its disks' registers; init=, iso=).  2026-10-06.
 
 The libc and libthread ones are for building wasm32 with 9front's mkfiles, with this
 tree's libc/wasm32/mkfile and libmp's, libsec's empty wasm32/mkfiles.

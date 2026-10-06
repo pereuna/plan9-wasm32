@@ -47,7 +47,9 @@ fn root {
 		echo init: $a(1): $t, not in the boot file system
 		return 1
 	}
-	{$t -s -f $a <[0=1] &} | echo 0 >/srv/boot
+	# a name space of its own: the root, bound before / below, is not in the server's own (its
+	# halt would walk through itself: fshalt's threadexitsall opens /proc/n/note)
+	{rfork n; $t -s -f $a <[0=1] &} | echo 0 >/srv/boot
 	if(! mount /srv/boot /root){
 		echo init: $a(1): $t: the root does not mount
 		return 1

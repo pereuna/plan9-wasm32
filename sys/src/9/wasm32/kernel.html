@@ -176,7 +176,25 @@ document.addEventListener('paste', (e) => {
  */
 const usedisk = q.get('disk') !== '0' && (q.get('boot') === 'disk' || q.get('boot') !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
 const fromdisk = usedisk ? await diskboot().catch(() => null) : null;
-if (fromdisk) pre.textContent += 'Plan9-wasm32 boots from the disk (esp: its kernel and boot root)\n';
+/*
+ * the loader: a disk whose boot FAT has its own firmware (index.html and platform.js, the
+ * installer's: inst/bootsetup) boots with it - the system, its firmware, kernel and plan9.ini,
+ * is the disk's until it is installed again.  This page gives the machine over to it, as a
+ * PC's firmware starts the disk's loader; window.plan9firmware is 'disk' in the disk's page
+ */
+if (fromdisk && !window.plan9firmware) {
+	const page = await fromdisk.get('index.html'), js = await fromdisk.get('platform.js');
+	if (page && js) {
+		window.plan9firmware = 'disk';
+		const url = URL.createObjectURL(new Blob([js], { type: 'text/javascript' }));
+		const html = new TextDecoder().decode(page).replace("from './platform.js'", "from '" + url + "'");
+		document.open();
+		document.write(html);
+		document.close();
+		await new Promise(() => {});	/* the disk's page has the machine */
+	}
+}
+if (fromdisk) pre.textContent += 'Plan9-wasm32 boots from the disk' + (window.plan9firmware === 'disk' ? ', its own firmware' : '') + '\n';
 /* ?iso=URL another, ?iso=file a local file the person chooses (nothing downloaded) */
 const iso = q.get('iso') ?? (fromdisk ? inival(fromdisk.conf, 'iso') : inival(ini, 'iso'));
 const isofile = iso === 'file' ? await new Promise((done) => {
@@ -197,7 +215,8 @@ boot(fromdisk ? fromdisk.kernel : '9wasm32.wasm', {
 	args,
 	/* the machine's disk (#S/sdW0): OPFS, ?disk=MB (4096: room for an installed system and its esp), ?disk=0 none */
 	disk: (q.get('disk') ?? '4096') !== '0' && navigator.storage?.getDirectory ? { name: 'sdW0', size: Number(q.get('disk') ?? 4096) * 1048576, fail: q.get('diskfail') } : null,
-	config: machine + (fromdisk ? iniconf(fromdisk.conf) : '') + q.getAll('conf').map((c) => c + '\n').join(''),
+	/* the disk's plan9.ini; a page's own init (?arg=) wins over its init= */
+	config: machine + (fromdisk ? iniconf(fromdisk.conf).replace(q.getAll('arg').length ? /^init=.*\n/mg : /$^/, '') : '') + q.getAll('conf').map((c) => c + '\n').join(''),
 	canvas: document.getElementById('screen'),
 	touchbutton: () => touchbutton,
 	screen: (([w, h]) => ({ w: Number(w) || ((q.get('console') === '1') ? 800 : innerWidth), h: Number(h) || ((q.get('console') === '1') ? 600 : innerHeight - barh) }))((q.get('screen') ?? '').split('x')),

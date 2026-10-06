@@ -23,6 +23,7 @@ if [ ! -e "$out/.$NAME" ]; then
 	rm -rf "$out"; mkdir -p "$out"
 	7z x -y -o"$out" "$iso" >/dev/null
 	rm -rf "$out/[BOOT]"
+	"$here/isomodes" "$iso" "$out" >/dev/null	# 7z knows no Plan 9 modes: the ISO's own
 	touch "$out/.$NAME"
 fi
 echo "$out"

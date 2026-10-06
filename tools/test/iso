@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""The tests' distribution: a small ISO made from the distribution's root
+(tools/dist: build/dist/root) - what the live system, 9front's init and
+termrc, and the installer (inst/start) run, and the boot materials - so that
+an install (tools/test/run's install) copies minutes' worth, not the whole
+release.  Its live image in build/test/dist: the page, the kernel, its boot
+file system, plan9.ini (cdboot=yes, iso=dist.iso) and the ISO.
+  PLAN9=... tools/test/iso
+"""
+import os, shutil, subprocess, sys
+
+root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+src = os.path.join(root, 'build/dist/root')
+out = os.path.join(root, 'build/test/dist')
+if not os.path.isdir(src):
+	sys.exit('iso: no build/dist/root (PLAN9=... tools/dist)')
+
+# whole trees, small
+TREES = ['rc', 'adm', 'usr/glenda', 'cfg', 'lib/ndb', 'lib/font/bit/vga', 'sys/lib/sysconfig', 'sys/lib/plumb', 'wasm32/9fat']
+FILES = ['lib/namespace', 'lib/namespace.ftp', 'lib/namespace.httpd', 'lib/keyboard', 'wasm32/init', 'wasm32/9wasm32.wasm']
+DIRS = ['dist/9front', 'tmp', 'mnt', 'n', 'usr/glenda/tmp']
+# the programs: the boot file system's, and what the live system, termrc and inst/start run
+PROGS = '''
+	9660srv auth/aescbc auth/factotum auth/secstore aux/kbdfs aux/timesync aux/mouse
+	awk basename bind cat chgrp chmod cleanname cp cwfs64x date dd disk/edisk disk/fdisk
+	disk/format disk/mbr disk/mkext disk/mkfs disk/prep dossrv echo exportfs gefs grep
+	gunzip hjfs ip/ipconfig ls mkdir mntgen mount mv ndb/cs ndb/dns ndb/query ns plumb
+	plumber ps pwd ramfs rc read rio rm sed sleep sort srv stats tail tar test tlsclient
+	touch tr uniq unmount wc webcookies webfs xd
+'''.split()
+
+files = []
+for t in TREES:
+	for dp, dn, fn in os.walk(os.path.join(src, t)):
+		dn[:] = [d for d in dn if d != '.git']
+		files += [os.path.relpath(os.path.join(dp, n), src) for n in fn]
+files += [f for f in FILES if os.path.isfile(os.path.join(src, f))]
+missing = [p for p in PROGS if not os.path.isfile(os.path.join(src, 'wasm32/bin', p))]
+if missing:
+	sys.exit('iso: not in the distribution: ' + ' '.join(missing))
+files += ['wasm32/bin/' + p for p in PROGS]
+
+iso = os.path.join(out, 'dist.iso')
+tree = os.path.join(root, 'build/test/disttree')
+shutil.rmtree(tree, ignore_errors=True)
+for f in files:
+	os.makedirs(os.path.dirname(os.path.join(tree, f)), exist_ok=True)
+	shutil.copy2(os.path.join(src, f), os.path.join(tree, f))
+for d in DIRS:
+	os.makedirs(os.path.join(tree, d), exist_ok=True)
+proto = os.path.join(root, 'build/test/dist.proto')
+def walk(d, depth, o):
+	for n in sorted(os.listdir(d)):
+		p = os.path.join(d, n)
+		if os.path.isdir(p):
+			o.write('\t' * depth + '%s\td775 sys sys\n' % n)
+			walk(p, depth + 1, o)
+		else:
+			o.write('\t' * depth + '%s\t%s sys sys\n' % (n, '775' if os.stat(p).st_mode & 0o111 else '664'))
+with open(proto, 'w') as o:
+	walk(tree, 0, o)
+shutil.rmtree(out, ignore_errors=True)
+os.makedirs(out)
+p9 = os.environ.get('PLAN9', os.path.expanduser('~/plan9port'))
+subprocess.run([os.path.join(p9, 'bin/dump9660'), '-M', '-c9j', '-p', proto, '-s', tree, '-v', 'Plan9-wasm32 test', iso],
+	check=True, cwd=os.path.join(root, 'build/test'), env=dict(os.environ, PATH=os.path.join(p9, 'bin') + ':' + os.environ['PATH']))
+live = os.path.join(root, 'build/dist/live')
+for f in ['index.html', 'platform.js', '9wasm32.wasm', '9wasm32.fs']:
+	shutil.copy2(os.path.join(live, f), out)
+open(os.path.join(out, 'plan9.ini'), 'w').write('cdboot=yes\niso=dist.iso\n')
+print('iso: %s (%d files, %d MB)' % (iso, len(files), os.path.getsize(iso) >> 20))
