@@ -7,8 +7,7 @@
 
 /*
  * #ω: the browser's WebAuthn (passkeys) for the machine (docs/webauthn.md).
- * ω, as 9front names some of its devices (σ, ¤): W is WireGuard
- * on Plan2001's pc64, where WebAuthn may go too.
+ * ω, a UTF-8 name, as 9front names some of its devices (σ, ¤).
  * The API is the page's (navigator.credentials), as the keyboard and the
  * disk are: the machine writes a request to #ω/webauthn, the page shows a
  * button - a browser wants a person's gesture for a passkey, and the

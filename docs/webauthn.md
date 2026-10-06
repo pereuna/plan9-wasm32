@@ -34,6 +34,3 @@ The test: `d5` (`sys/src/9/wasm32/test/d5.c`) with the browser's virtual
 authenticator (`tools/test/wasmapp`'s `WEBAUTHN`): a passkey made and got,
 PRF the same for the same salt and another for another, a request
 cancelled on the page, another domain refused.
-
-What uses it is the system's own: Plan2001's accounts, for one, sign in
-with a passkey whose PRF opens the account's keys.

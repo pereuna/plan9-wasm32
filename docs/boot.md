@@ -5,8 +5,7 @@ parts: the data, a BootInfo blob, the same for every ISA
 (`sys/include/bootinfo.h`, which loader and kernel both use), and the
 entry, the ISA's own.  On wasm32 the page is the firmware and the loader:
 `platform.js`'s `boot()` makes the same BootInfo a UEFI loader makes for
-amd64 or arm64 (BootInfo v1 comes from Plan2001's fork, where those
-loaders are).
+amd64 or arm64 (BootInfo v1 is the same for every ISA).
 
 The rule: **the loader says where things are; the kernel does not
 guess.**  Neither part has a fixed physical address.

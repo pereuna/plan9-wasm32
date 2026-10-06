@@ -10,9 +10,8 @@ and builds from a pinned 9front release with this tree laid over it: new
 files in 9front's root layout (`sys/`, `wasm32/`) and patches to
 9front's own files (`patches/9front/`).
 
-Imported 2026-10-05 from Plan2001 (github.com/pereuna/Plan2001, 59ee476),
-where it was developed as `plan9/`; Plan2001's services (its accounts
-and their passkey login, its cloud) stay there.
+Imported 2026-10-05 from github.com/pereuna/Plan2001 (59ee476), where it
+was first developed.
 
 ## Building
 

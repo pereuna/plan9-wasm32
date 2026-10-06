@@ -46,40 +46,25 @@ own; "9front" here means that project.  It is installed and booted as
 
 ## Steps
 
-1. The import from Plan2001 (done): the port, #ω, init without
-   Plan2001's login and app origins.  It has Plan2001's work in progress
-   on the disk too: partitions on #S/sdW0 (part, delpart: devsdw.c),
-   /boot/disk reading the GPT and prep tables (diskparts) and hjfs on fs,
-   and platform.js's diskboot (GPT, esp's FAT with VFAT names: the kernel,
-   bootfs, plan9.ini) - tried in Plan2001's tests (a disk laid out as
-   9front's, booted from its esp after a reload), not yet in this tree's.
-2. The build here: fetch the release, lay the tree over it, 3c/3l for the
-   host, the native build (from Plan2001's tools/9front-2001,
-   native-wasm32, dist-wasm32); the kernel and bootfs.  Done 2026-10-05:
-   tools/build (release, tree, hostcc, native, bootfs: sys/src/9/wasm32/
-   bootfs.proto) makes build/live; tools/serve serves it.  Plan2001's
-   harness against it (PAGEURL): echo, rc, init and boot (rio) pass.
-3. The tests here: the browser harness (test-wasmapp, a page server), the
-   kernel's and the platform's tests; Plan2001's (accounts, its cloud)
-   stay there.  2026-10-05: tools/test/run (wasmapp, authsrv: dp9ik,
-   secstore, an rcpu relay; tools/serve with a relay to the gateway), the
-   test programs by mk (sys/src/9/wasm32/test/mkfile, test.proto).  Left
-   with Plan2001: its accounts and login, the app origins' rcpu session
-   (platform.js's /rcpu session code removed here), the installer, the
-   tests against its CPU VM (net, netloop: d2 wants an rcpu server),
-   rcpukeys (its profile: a CPU session uses the terminal's factotum).  The
-   page takes plan9.ini from the server (secstore=, passkeyrp=) in place of
-   Plan2001's /secstore and /login files.
+1. The import (done, 2026-10-05): the port, its devices (#ω among them),
+   init, the disk's partitions and the firmware's boot from the disk.
+2. The build (done, 2026-10-05): the release fetched (its checksum), this
+   tree over it, 3c/3l for the host, built natively with 9front's mkfiles
+   (tools/build: release, tree, hostcc, native, bootfs); tools/serve
+   serves the page.
+3. The tests (done, 2026-10-05): tools/test/run - the browser harness
+   (wasmapp), a stand-in for the network (authsrv: dp9ik, secstore, an
+   rcpu relay), the test programs by mk; the page takes plan9.ini from
+   the server.
 4. The live image and inst/start for wasm32 (9front's installer: the
-   disk's layout, copydist from the distribution disk, bootsetup to esp).  In progress
-   (2026-10-06, docs/install.md): tools/dist makes the ISO and the live
-   image; the live image boots from it as 9front's ISO does (9660 root,
-   9front's init, termrc, rio).  inst/start on the console: configfs (hjfs),
-   partdisk, prepdisk, mountfs, confignet, mountdist, copydist (the whole
-   distribution onto the OPFS disk), ndbsetup and tzsetup done.  Left:
-   bootsetup (with two FATs it has no default: answer /dev/sdW0/9fat),
-   finish (fshalt -r, the page reloads), the boot from the disk, an install
-   test in tools/test/run (a small test ISO), the full suite again.
-5. The loader page: boot from the disk's esp, else the live image.
+   disk's layout, copydist from the distribution disk, bootsetup).  In
+   progress (2026-10-06, docs/install.md): tools/dist makes the ISO and the
+   live image; the live image boots from it as 9front's ISO does (9660
+   root, 9front's init, termrc, rio).  inst/start on the console: configfs
+   (hjfs), partdisk, prepdisk, mountfs, confignet, mountdist, copydist (the
+   whole distribution onto the OPFS disk), ndbsetup and tzsetup done.
+   Left: bootsetup, finish (fshalt -r, the page reloads), the boot from the
+   disk, an install test in tools/test/run (a small test ISO).
+5. The loader page: boot from the disk's FAT (its firmware, kernel and
+   plan9.ini), else the live image.
 6. plan2001.com/plan9-wasm32/: the live image and the distribution.
-7. Plan2001 takes Plan9-wasm32 as its base (its services over it).
