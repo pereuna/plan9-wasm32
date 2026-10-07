@@ -20,7 +20,10 @@
  * has no room for is dropped, as a full card's would be.  A kproc gives
  * them to devether.  What goes out goes to the page a frame at a time
  * (platethersend), which drops it if the WebSocket is not open or is
- * full.  The link is up while the gateway's WebSocket is open.
+ * full.  The link is up while the gateway's WebSocket is open.  The
+ * wire is not trusted: a frame shorter than its header or longer than
+ * ETHERMAXTU is dropped either way (framing errors in, output errors
+ * out), never cut to size.
  *
  * plan9.ini: ether0=type=wasm32 ea=... (the page's, the same each time
  * in one browser: the firmware's)
@@ -83,6 +86,11 @@ etherin(void *arg)
 				r->r = w;
 				break;
 			}
+			if(n < ETHERHDRSIZE || n > Mtu){
+				ether->frames++;
+				r->r += 2+n;
+				continue;
+			}
 			bp = allocb(n);
 			for(i = 0; i < n; i++)
 				bp->wp[i] = ringbyte(r, r->r+2+i);
@@ -105,9 +113,9 @@ transmit(Ether *ether)
 	lock(&ctlr->tlock);
 	while((bp = qget(ether->oq)) != nil){
 		n = BLEN(bp);
-		if(n > Mtu)
-			n = Mtu;
-		if(n >= ETHERHDRSIZE && ctlr->in->link > 0)
+		if(n < ETHERHDRSIZE || n > Mtu)
+			ether->oerrs++;
+		else if(ctlr->in->link > 0)
 			platethersend(bp->rp, n);
 		freeb(bp);
 	}

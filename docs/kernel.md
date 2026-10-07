@@ -55,9 +55,17 @@ writes into the card's ring in kernel memory, and a kproc gives it to
 devether; past a full ring a frame is dropped, as a card's would be.
 What goes out goes to the page a frame at a time, and is dropped while
 the WebSocket is not open or is full.  The link is up while it is open.
-The other end is the machine's gateway (`tools/gateway`): a switch, the
-machines on it and a TAP device its ports - a network of its own with
-DHCP (`-n`, no root needed) or the host's (`-t`).
+A frame shorter than its header or longer than 1514 bytes is dropped
+both ways, never cut to size: the wire is not trusted.  The other end is
+the machine's gateway (`tools/gateway`): a switch, the machines on it
+and a TAP device its ports - a network of its own with DHCP (`-n`, no
+root needed; QEMU's user network's addresses but not its NAT: it reaches
+the host's namespace and the machines on it, no further) or the host's
+(`-t`, bridged or NATed by root).  It takes whole frames only, one MAC
+address a machine, pages of its allowed origins (`-o`, loopback
+without), and bounds its table; it has no authentication, so it is not
+yet for a public site.  As a learning switch it gives a machine only its
+own, broadcast and multicast frames: promiscuous mode sees no more.
 
 ## Boot
 

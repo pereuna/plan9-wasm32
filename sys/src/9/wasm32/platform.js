@@ -1280,7 +1280,8 @@ export async function boot(url, front = {}) {
 	 * front.ws + /ether, the machine's gateway, a frame a message each way.
 	 * What comes in goes into the kernel's ring - r, w, link, drops, then
 	 * the frames, each its length (2 bytes, little-endian) and its bytes -
-	 * or, past a full ring, is dropped and counted, as a card's would be;
+	 * or, past a full ring, is dropped and counted, as a card's would be
+	 * (and one shorter than its header or longer than ETHERMAXTU, 1514);
 	 * what goes out is dropped while the WebSocket is not open or holds
 	 * more than ETHERQ.  link is 1 while it is open; closed, it is opened
 	 * again, a second later, then longer each time up to a minute
@@ -1292,7 +1293,7 @@ export async function boot(url, front = {}) {
 		const i32 = new Int32Array(mem.buffer), u8 = new Uint8Array(mem.buffer), R = ether.ring;
 		let w = Atomics.load(i32, (R + 4) >> 2) >>> 0;
 		const room = NERING - ((w - (Atomics.load(i32, R >> 2) >>> 0)) >>> 0);
-		if (f.length > 0xffff || 2 + f.length > room) { Atomics.add(i32, (R + 12) >> 2, 1); return; }
+		if (f.length < 14 || f.length > 1514 || 2 + f.length > room) { Atomics.add(i32, (R + 12) >> 2, 1); return; }
 		u8[R + 16 + (w++ & (NERING - 1))] = f.length & 0xff;
 		u8[R + 16 + (w++ & (NERING - 1))] = f.length >> 8;
 		for (let i = 0; i < f.length; i++) u8[R + 16 + (w++ & (NERING - 1))] = f[i];
@@ -1322,7 +1323,7 @@ export async function boot(url, front = {}) {
 	ether.start = (ring) => { ether.ring = ring; ether.connect(); };
 	ether.send = (b) => {
 		const ws = ether.ws;
-		if (ws?.readyState === 1 && ws.bufferedAmount < ETHERQ) ws.send(b);
+		if (b.length >= 14 && b.length <= 1514 && ws?.readyState === 1 && ws.bufferedAmount < ETHERQ) ws.send(b);
 	};
 
 	/* a test's: the nth Worker of a kind is not made - a fork's child, a helper, an rfork(RFMEM) child's (platform.h) */

@@ -7,9 +7,24 @@ machine a port of it, and a TAP device another, its frames those of the
 host's network.  The switch learns where each address is and floods the
 rest, so machines on it reach each other as on a LAN.
 
+The wire is not trusted.  A message is one whole frame: a masked binary
+WebSocket frame with FIN, 14 to 1514 bytes (no fragments); anything else
+closes the connection.  A machine's port has one MAC address, its first
+frame's source, not one another live port has; a frame from another is
+dropped.  The switch's table holds at most 4096 addresses, each for 5
+minutes after it was last seen.  A page's Origin must be one -o names,
+or on loopback without -o (a browser on another site may not plug into
+the network); a client without Origin (not a browser) is taken.  There
+is no authentication: this is for one's own machine and its tests, not
+a public site, which would need one before a port is given.  The
+switch does not hand a machine frames for another's address, so a card
+in promiscuous mode sees only its own, broadcast and multicast.
+
   -n  a network of its own, no root needed: a user and network namespace
-      with tap0 in it, 10.0.2.2/24 (as QEMU's user network: the machine
-      10.0.2.15 and up), and a DHCP server here for the machines - their
+      with tap0 in it, 10.0.2.2/24 (QEMU's user network's addresses, the
+      machine 10.0.2.15 and up, but not its NAT: the network goes no
+      further than this host's namespace - the tests' services, and the
+      machines to each other), and a DHCP server here for the machines - their
       address, mask and gateway, and 10.0.2.2 as their auth server
       (Plan 9's DHCP option, ipconfig's auth=).  CMD after -- runs in
       that namespace (the tests' services: tools/test/authsrv 10.0.2.2)
@@ -17,16 +32,19 @@ rest, so machines on it reach each other as on a LAN.
       host's LAN (ip tuntap add NAME mode tap user $USER, as root): its
       network's DHCP, not this one's
   -d  the DHCP server with -t too (10.0.2.0/24 on that TAP)
+  -o ORIGIN  a page's origin that may connect (http://host:port), more
+      than one -o for more
 
-  tools/gateway [-p PORT] (-n | -t NAME [-d]) [-- CMD...]	PORT 17080
+  tools/gateway [-p PORT] [-o ORIGIN]... (-n | -t NAME [-d]) [-- CMD...]	PORT 17080
 """
-import asyncio, base64, ctypes, fcntl, hashlib, ipaddress, os, socket, struct, subprocess, sys
+import asyncio, base64, ctypes, fcntl, hashlib, ipaddress, os, re, socket, struct, subprocess, sys, time
 
 port = 17080
 tapname = None
 ownnet = False
 dhcp = False
 cmd = []
+origins = []
 a = sys.argv[1:]
 while a:
 	if a[0] == '-p':
@@ -37,6 +55,8 @@ while a:
 		ownnet = dhcp = True; a = a[1:]
 	elif a[0] == '-d':
 		dhcp = True; a = a[1:]
+	elif a[0] == '-o':
+		origins.append(a[1].rstrip('/')); a = a[2:]
 	elif a[0] == '--':
 		cmd = a[1:]; a = []
 	else:
@@ -48,6 +68,8 @@ NET = ipaddress.IPv4Network('10.0.2.0/24')
 GW = ipaddress.IPv4Address('10.0.2.2')
 FIRST = 15
 BCAST = b'\xff' * 6
+MINFRAME, MAXFRAME = 14, 1514	# a header, ETHERMAXTU
+NWHERE, AGE = 4096, 300
 
 def log(*a):
 	print('gateway:', *a, file=sys.stderr, flush=True)
@@ -78,23 +100,44 @@ if ownnet:
 log(f'ws://127.0.0.1:{port}/ether, {tapname}' + (f' {GW}/{NET.prefixlen}' if ownnet else '') + (', DHCP' if dhcp else ''))
 
 class Port:
-	def __init__(self, name, send):
+	def __init__(self, name, send, machine=False):
 		self.name = name
 		self.send = send
+		self.machine = machine	# a machine's WebSocket: one MAC address, its first frame's
+		self.mac = None
 
-where = {}	# a MAC address -> the port it was last seen on
+where = {}	# a MAC address -> (the port it was last seen on, when)
 ports = []
 
+def learn(src, mac, now):
+	if mac not in where and len(where) >= NWHERE:
+		for k in [k for k, (p, t) in where.items() if now - t > AGE]:
+			del where[k]
+		if len(where) >= NWHERE:
+			return	# full: not learnt, frames to it flood
+	where[mac] = (src, now)
+
 def switch(src, f):
-	if len(f) < 14:
-		return
-	where[f[6:12]] = src
+	if len(f) < MINFRAME or len(f) > MAXFRAME or f[6] & 1:
+		return	# no source is a group address
+	sa = f[6:12]
+	if src.machine:
+		if src.mac is None:
+			if any(p.machine and p.mac == sa for p in ports):
+				log(f'{src.name}: {sa.hex()} is another machine\'s: dropped')
+				src.mac = b'taken'
+				return
+			src.mac = sa
+		if sa != src.mac:
+			return
+	now = time.monotonic()
+	learn(src, sa, now)
 	if dhcp and dhcpin(src, f):
 		return
-	dst = where.get(f[0:6]) if f[0] & 1 == 0 else None
-	if dst is not None:
-		if dst is not src:
-			dst.send(f)
+	w = where.get(f[0:6]) if f[0] & 1 == 0 else None
+	if w is not None and now - w[1] <= AGE and w[0] in ports:
+		if w[0] is not src:
+			w[0].send(f)
 		return
 	for p in ports:
 		if p is not src:
@@ -166,6 +209,14 @@ def dhcpin(src, f):
 	src.send(BCAST + gwmac + b'\x08\x00' + h + u)
 	return True
 
+def originok(o):
+	if o is None:
+		return True	# not a browser
+	o = o.rstrip('/')
+	if origins:
+		return o in origins
+	return re.fullmatch(r'https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?', o) is not None
+
 # the TAP: a port of the switch
 def tapsend(f):
 	try:
@@ -198,6 +249,11 @@ async def machine(r, w):
 		w.write(b'HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n')
 		w.close()
 		return
+	if not originok(hdr.get('origin')):
+		log(f'refused: origin {hdr.get("origin")}')
+		w.write(b'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n')
+		w.close()
+		return
 	acc = base64.b64encode(hashlib.sha1((hdr['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
 	w.write(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
 		f'Sec-WebSocket-Accept: {acc}\r\n\r\n').encode())
@@ -206,41 +262,43 @@ async def machine(r, w):
 			return	# a machine that does not keep up: dropped
 		n = len(f)
 		w.write((bytes([0x82, n]) if n < 126 else bytes([0x82, 126]) + struct.pack('>H', n)) + f)
-	me = Port(f'ws{id(w):x}', send)
+	me = Port(f'ws{id(w):x}', send, True)
 	ports.append(me)
 	log(f'{me.name}: a machine')
 	try:
-		frag = bytearray()
 		while True:
 			b0, b1 = await r.readexactly(2)
-			n = b1 & 0x7f
+			op, n = b0 & 0x0f, b1 & 0x7f
 			if n == 126:
 				n = struct.unpack('>H', await r.readexactly(2))[0]
 			elif n == 127:
-				n = struct.unpack('>Q', await r.readexactly(8))[0]
-			if n > 65536:
 				break
-			mask = await r.readexactly(4) if b1 & 0x80 else b'\0'*4
+			# a whole frame a message, from a client (masked); a control frame its own size
+			if not b0 & 0x80 or not b1 & 0x80 or b0 & 0x70:
+				break
+			if op == 2:
+				if n < MINFRAME or n > MAXFRAME:
+					break
+			elif op in (8, 9, 10):
+				if n > 125:
+					break
+			else:
+				break
+			mask = await r.readexactly(4)
 			data = await r.readexactly(n)
 			if n:
 				data = (int.from_bytes(data, 'big') ^ int.from_bytes((mask * (n // 4 + 1))[:n], 'big')).to_bytes(n, 'big')
-			op = b0 & 0x0f
 			if op == 8:
 				break
 			if op == 9:
 				w.write(bytes([0x8a, len(data)]) + data)
-				continue
-			if op not in (0, 2):
-				continue
-			frag.extend(data)
-			if b0 & 0x80:
-				switch(me, bytes(frag))
-				frag.clear()
+			elif op == 2:
+				switch(me, data)
 	except (asyncio.IncompleteReadError, ConnectionError):
 		pass
 	finally:
 		ports.remove(me)
-		for k in [k for k, v in where.items() if v is me]:
+		for k in [k for k, v in where.items() if v[0] is me]:
 			del where[k]
 		log(f'{me.name}: gone')
 		w.close()
