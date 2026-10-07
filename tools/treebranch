@@ -1,0 +1,68 @@
+#!/bin/bash
+# The tree branch: the machine's whole source, a snapshot - 9front's
+# release (its commit's files, from the release's /dist/9front/.git,
+# tools/release; not its history: 9front's own is github.com/9front/9front)
+# and this tree's files over it (the files patches/9front makes, and the
+# new ones: git ls-files of main's HEAD, as tools/tree takes them),
+# without 9front's off-topic files (tools/dist.deny).  Its root is the
+# machine's /: the installer copies it with /dist/9front/.git, and
+# bind -ac /dist/9front / makes / its work tree, as on 9front.  A commit
+# a run when the source has changed, onto the branch's last (the first
+# has none): a new release or a new main is one more snapshot.  Nothing
+# in the work tree is touched (a worktree of its own, in build/).
+#   tools/treebranch	[TREEMSG: more lines for the commit's message]
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
+cd "$root"
+rel=$("$here/release")
+git fetch -q --no-tags "$rel/dist/9front" +refs/heads/front:refs/9front/front
+base=$(git rev-parse refs/9front/front)
+parent=$(git rev-parse -q --verify refs/heads/tree || true)
+main=$(git rev-parse --short HEAD)
+wt=$root/build/treebranch
+git worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"
+git worktree prune
+git worktree add -q --detach "$wt" "$base"
+trap 'git worktree remove --force "$wt" 2>/dev/null || true' EXIT
+# this tree's files over 9front's, as tools/tree lays them
+files=$(git ls-tree -r --name-only HEAD | grep -v -e '^patches/' -e '^tools/' -e '^docs/' -e '^third_party/' -e '^README' -e '^\.git')
+git archive HEAD -- $files | tar -x -C "$wt"
+# the patched files are among them: each must be its patch applied to 9front's
+tmp=$(mktemp -d)
+for p in patches/9front/*.diff; do
+	for f in $(sed -n 's|^+++ b/\([^	 ]*\).*|\1|p' "$p"); do
+		mkdir -p "$tmp/$(dirname "$f")"; git show "$base:$f" >"$tmp/$f"
+	done
+	patch -s -p1 -d "$tmp" <"$p" || { echo "treebranch: $(basename "$p") does not apply to 9front's" >&2; exit 1; }
+	for f in $(sed -n 's|^+++ b/\([^	 ]*\).*|\1|p' "$p"); do
+		cmp -s "$tmp/$f" "$wt/$f" || { echo "treebranch: $f is not $(basename "$p") applied to 9front's" >&2; exit 1; }
+	done
+done
+rm -rf "$tmp"
+# 9front's off-topic files
+(cd "$wt" && git ls-files) | python3 -I -c '
+import re, sys
+deny = [re.compile(l.strip()) for l in open(sys.argv[1]) if l.strip() and not l.startswith("#")]
+for f in sys.stdin:
+	f = f.rstrip("\n")
+	if any(d.search("/" + f) for d in deny):
+		print(f)
+' "$here/dist.deny" | (cd "$wt" && xargs -r git rm -q --)
+git -C "$wt" add -A
+tree=$(git -C "$wt" write-tree)
+if [ -n "$parent" ] && [ "$(git rev-parse "$parent^{tree}")" = "$tree" ]; then
+	echo "treebranch: tree is $(git rev-parse --short "$parent"): no change"
+	exit 0
+fi
+parents=()
+[ -z "$parent" ] || parents=(-p "$parent")
+msg="plan9-wasm32 $main over 9front $(git rev-parse --short "$base")
+
+The machine's source: 9front's (tools/release: $(sed -n 's/^NAME=//p' "$here/release.conf")) and plan9-wasm32's
+main $main over it (tools/treebranch), without 9front's off-topic files."
+[ -z "${TREEMSG:-}" ] || msg="$msg
+
+$TREEMSG"
+c=$(git commit-tree "$tree" "${parents[@]}" -m "$msg")
+git update-ref refs/heads/tree "$c"
+echo "treebranch: tree is $(git rev-parse --short "$c") (over 9front's: $(git diff --shortstat "$base" "$c"))"

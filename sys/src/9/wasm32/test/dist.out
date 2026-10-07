@@ -1,0 +1,14 @@
+ticks in it: ok
+hjfs: fs is /dev/sdW0/fs
+init: the root is local!/dev/sdW0/fs -m 128
+init: warning: can't set priority: bad process or channel control request
+
+init: starting /bin/rc
+heads/tree
+the branch is at origin
+walk status 
+built echo
+hello from echo built here
+built hoc
+5
+hjfs: ending

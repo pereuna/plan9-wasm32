@@ -1,0 +1,24 @@
+# The distribution's programs (tools/dist): what the ISO has built for
+# wasm32 under /wasm32/bin - the base system, and the tools to build the
+# rest of it on the machine from its source (/dist/9front, the tree
+# branch: bind -ac /dist/9front /; cd /sys/src; mk install).  Paths under
+# /wasm32/bin; a directory/ all of it.
+
+# the boot file system's (/boot/init's file servers), the live system's,
+# termrc's, rio's and inst/start's
+9660srv cwfs64x dossrv gefs hjfs
+auth/aescbc auth/factotum auth/secstore
+aux/getflags aux/kbdfs aux/listen aux/listen1 aux/mouse aux/samterm aux/timesync
+disk/edisk disk/fdisk disk/format disk/mbr disk/mkext disk/mkfs disk/prep
+awk basename bind cat chgrp chmod cleanname cmp cp date dd diff du echo ed
+file fmt grep gunzip gzip hoc ls mkdir mntgen mount mv ns p ps pwd
+ramfs rc read rm sed seq sleep sort split srv strings tail tar tee test time
+touch tr uniq unmount walk wc xargs xd
+rio plumb plumber stats clock acme sam
+# the network: ipconfig, cs and dns, TLS, the web (git's https), rcpu's
+ip/ipconfig ip/ping ndb/cs ndb/dns ndb/query
+exportfs tlsclient tlssrv webcookies webfs
+# the tools: the compilers, mk, the libraries' and source's (yacc, lex, APE's
+# pcc and cpp), and git
+3a 3c 3l ar cpp lex mk patch pcc size strip yacc
+git/

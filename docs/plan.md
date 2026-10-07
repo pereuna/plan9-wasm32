@@ -41,7 +41,11 @@ own; "9front" here means that project.  It is installed and booted as
 - patches/9front: changes to 9front's own files (upstream).
 - The build: 9front's release (pinned, its ISO's checksum), this tree
   over it, built with 9front's own mkfiles natively (plan9port's mk on
-  Linux); the whole release for wasm32 is the distribution.
+  Linux).
+- The distribution (docs/install.md): the tree branch - a snapshot of
+  9front's release and this tree over it, the machine's whole source - and an ISO
+  with it and its git, built for wasm32 only the base system and the
+  tools; the machine builds the rest itself, and updates with git.
 - 9front's off-topic files are left out (jokes, quotations); no "legacy
   removed" changes: the platform is new, not a PC.
 
@@ -76,3 +80,11 @@ own; "9front" here means that project.  It is installed and booted as
    own with DHCP (-n) for offline and the tests, or the host's (-t).
    https://plan2001.com/plan9-wasm32/ has no gateway yet: the card is there,
    its link down.
+8. The distribution as 9front's (in progress, 2026-10-07): the tree
+   branch (tools/treebranch), a snapshot of 9front's release and this tree; the ISO
+   (tools/dist) its files and .git, the base system and the tools built
+   (tools/dist.base); installed from a local copy of the ISO, then bind
+   -ac /dist/9front /; cd /sys/src; mk install on the machine - the build
+   is the PoC's test, people's to run; tools/test/run dist installs the
+   ISO and checks its git and a small build.  Next: the ISO on
+   plan2001.com/iso; git/pull from GitHub through a gateway with a way out.

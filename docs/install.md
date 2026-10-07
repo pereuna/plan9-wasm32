@@ -1,16 +1,54 @@
 # Installing Plan9-wasm32
 
 As 9front is installed on a PC: boot the live image, run `inst/start`,
-reboot from the disk.
+reboot from the disk; then the machine builds its own system from its
+source, and updates it with git.
+
+## The distribution
+
+A binary base, the tools, and the whole source with its git:
+
+- **The source** is this repository's `tree` branch (`tools/treebranch`),
+  a snapshot: 9front's release (its commit's files, not its history -
+  9front's own is `github.com/9front/9front`) and this tree's files over
+  it (the port, 3c/3a/3l, the patched files), without 9front's jokes and
+  quotations (`tools/dist.deny`); a new release or a new main is one more
+  commit.  Its root is the machine's `/`.
+- **The ISO** (`tools/dist`: `build/dist/plan9-wasm32.iso`, plan9port's
+  dump9660, `-c9j` as 9front's mkfile) has the branch's files, and built
+  for wasm32 only the base system and the tools (`tools/dist.base`: the
+  file servers, rc and the commands the live system, termrc, rio and
+  inst/start run, the network, an editor; 3c/3a/3l, mk, yacc, lex, ar,
+  pcc, git), the libraries and the boot materials - and in
+  `/dist/9front/.git` the branch, its work tree the root, as 9front's
+  ISO has its repository.  `tools/dist` builds the whole
+  release here too (`build/dist/failed`: what does not build yet, mostly
+  APE programs): a check of the source, and where the base comes from.
+- **On the site** the ISO is `https://plan2001.com/iso/`, as 9front's is
+  `9front.org/iso/`: downloaded once, installed from the computer it is
+  on (`?iso=file`).  The page and its kernel come from the site, as a
+  machine's firmware: `index.html` is the browser tab's (the origin's)
+  boot, and it gives the machine over to the ISO.
+
+After the install, on the machine (as 9front's sysupdate):
+
+    bind -ac /dist/9front /
+    cd /sys/src
+    mk install                  # the rest of the system, built here
+
+and to update it, from this repository (the machine's network must
+reach GitHub: a gateway with a way out, `tools/gateway -t`):
+
+    bind -ac /dist/9front /
+    cd / && git/pull            # origin: https://github.com/pereuna/plan9-wasm32, branch tree
+    cd /sys/src && mk install
+
+A machine without `/dist/9front` gets it with
+`git/clone -b tree https://github.com/pereuna/plan9-wasm32 /dist/9front`.
+The kernel, once built (`cd /sys/src/9/wasm32; mk install`), goes onto
+the boot FAT as inst/bootsetup puts it there.
 
 ## The live image
-
-`tools/dist` builds the whole 9front release for wasm32 (with
-`tools/native`: the libraries, the commands, the games; what does not
-build yet is listed in `build/dist/failed`, mostly APE programs) and
-makes of it an ISO 9660 image, as 9front's ISO: `build/dist/plan9-wasm32.iso`
-(plan9port's mk9660, `-c9j` as 9front's mkfile).  9front's jokes and
-quotations are left out (`tools/dist.deny`).
 
 The live image is the page, the kernel, its boot file system, plan9.ini
 and the ISO: `build/dist/live`.
@@ -75,7 +113,7 @@ is not in the server's, or its halt (fshalt) would walk through itself.
 `?boot=net` boots the live image again (to install anew); `?disk=0` boots
 without the disk.
 
-## The test
+## The tests
 
 `tools/test/run install` (with `build/dist` there): `tools/test/iso` makes a
 small distribution (what the installer, termrc and rio run) and its live
@@ -83,3 +121,11 @@ image; inst/start is answered on the console, `fshalt -r` reboots, and the
 page boots from the disk with the disk's firmware, the root the installed
 hjfs.  `PROFILE=dir` keeps the browser's profile, and with it the disk,
 between runs of `tools/test/wasmapp`.
+
+`tools/test/run dist`, only when named (the ISO is large): the
+distribution's own ISO installed from this computer (`?iso=file`), then
+on the disk its git as sysupdate has it (`bind -ac /dist/9front /`: the
+branch, at origin, the work tree clean) and a small build with the
+machine's own tools - echo and hoc from `/sys/src/cmd` (mk, 3c, 3l,
+yacc), installed and run.  The whole system's build (`cd /sys/src; mk
+install`) is people's to run.

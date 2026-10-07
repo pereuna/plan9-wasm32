@@ -1,18 +1,20 @@
 #!/bin/bash
-# The distribution, as 9front's ISO: the whole release built for wasm32
-# (tools/native with mk -k: the libraries, the commands, the games, the
-# kernel; what does not build is listed in build/dist/failed) in a tree of
-# its own, its boot materials in /wasm32 - the kernel (9wasm32.wasm), and
-# in /wasm32/9fat its boot file system (9wasm32.fs, tools/bootfs) and the
-# firmware (index.html, platform.js), which the installer puts on the boot
-# FAT with plan9.ini (inst/bootsetup) - and
-# made an ISO 9660 image with plan9port's mk9660 (9front's -c9j: ISO 9660's names, Plan 9's own in its extension, as 9660srv reads them; Plan 9's
-# names and modes, Joliet): build/dist/plan9-wasm32.iso; and the live
-# image that boots it, build/dist/live.  Left out: the
-# other machines' binaries and libraries (their headers stay: libmach
-# and the cross compilers), the build's objects, and 9front's off-topic
-# files (tools/dist.deny: jokes and quotations).  /dist/9front is there,
-# as the installer looks for it (inst/mountdist).
+# The distribution, as 9front's ISO: the machine's source with its git
+# (the tree branch, tools/treebranch: a snapshot of 9front's release and
+# this tree over it) and built for wasm32 only what the base system and the tools to
+# build the rest need (tools/dist.base) - the rest is the machine's to
+# build: bind -ac /dist/9front /; cd /sys/src; mk install.  Here the whole
+# release is built for wasm32 (tools/native with mk -k: the libraries,
+# the commands, the games, the kernel; what does not build is listed in
+# build/dist/failed) in a tree of its own, a check of the source and where
+# the programs come from; its boot materials in /wasm32 - the kernel
+# (9wasm32.wasm), and in /wasm32/9fat its boot file system (9wasm32.fs,
+# tools/bootfs) and the firmware (index.html, platform.js), which the
+# installer puts on the boot FAT with plan9.ini (inst/bootsetup).  Made an
+# ISO 9660 image with plan9port's dump9660 (9front's -c9j: ISO 9660's
+# names, Plan 9's own in its extension, as 9660srv reads them; Plan 9's
+# names and modes, Joliet): build/dist/plan9-wasm32.iso, to put on the
+# site's /iso; and the live image that boots it, build/dist/live.
 #   PLAN9=... tools/dist
 set -e
 here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
@@ -50,27 +52,75 @@ v="$(git -C "$root" describe --always --dirty 2>/dev/null || echo unknown) $(dat
 sed "s|@VERSION@|$v|" "$w/kernel.html" >"$fat/index.html"
 cp "$w/platform.js" "$fat/platform.js"
 
-# the image's root
+# the image's root: the tree branch's files (tools/treebranch: the source, as 9front's git has
+# it), the release's directories git does not keep (cfg, cron, mail, usr, tmp), the programs
+# tools/dist.base names, the libraries and the boot materials built here, and /dist/9front/.git -
+# the branch, whose work tree the root is (bind -ac /dist/9front /, as 9front's
+# sysupdate)
+"$here/treebranch" >/dev/null
 out=$d/root
 rm -rf "$out"; mkdir -p "$out"
-for t in "$tree"/*; do
-	n=$(basename "$t")
-	case $n in
-	tmp) mkdir -p "$out/$n" ;;
-	386|68000|68020|amd64|arm|arm64|mips|power|power64|sparc|sparc64|spim)
-		mkdir -p "$out/$n"; [ ! -d "$t/include" ] || cp -a "$t/include" "$out/$n/" ;;
-	*) cp -a "$t" "$out/" ;;
-	esac
-done
-find "$out/sys/src" -type f \( -name '*.3' -o -name '3.*' -o -name '*.a3' \) -delete
-removed=0
-while read -r rx; do
-	case $rx in ''|'#'*) continue ;; esac
-	for f in $(cd "$out" && find . -type f | sed 's|^\.||' | grep -E "$rx" || true); do
-		rm -f "$out$f"; removed=$((removed+1))
-	done
-done <"$here/dist.deny"
-mkdir -p "$out/dist/9front" "$out/usr/glenda/bin/wasm32"
+git -C "$root" archive tree | tar -x -C "$out"
+# what 9front's ISO has that its git does not: the release's own files (lib/ndb, adm/timezone/local,
+# cfg, mail, sys/log, the manuals' indexes ...) - not the other machines' programs, libraries and
+# boot files, the source's made files, or its git
+rel=$("$here/release")
+git -C "$root" ls-tree -r --name-only refs/9front/front | python3 -I -c '
+import os, re, shutil, sys
+rel, out, deny = sys.argv[1:]
+tracked = set(l.rstrip("\n") for l in sys.stdin)
+skip = re.compile(r"^((386|68000|68020|amd64|arm|arm64|mips|power|power64|sparc|sparc64|spim)/(?!include/|mkfile$)|sys/src/|acme/bin/amd64/|dist/|tmp/)")
+deny = [re.compile(l.strip()) for l in open(deny) if l.strip() and not l.startswith("#")]
+for dp, dn, fn in os.walk(rel):
+	dn.sort()
+	r = os.path.relpath(dp, rel)
+	r = "" if r == "." else r + "/"
+	if not fn and not dn and r and not skip.match(r):
+		os.makedirs(os.path.join(out, r), exist_ok=True)
+	for n in fn:
+		f = r + n
+		if f in tracked or skip.match(f) or any(d.search("/" + f) for d in deny):
+			continue
+		os.makedirs(os.path.join(out, r), exist_ok=True)
+		shutil.copy2(os.path.join(rel, f), os.path.join(out, f))
+' "$rel" "$out" "$here/dist.deny"
+mkdir -p "$out/tmp" "$out/dist/9front" "$out/usr/glenda/bin/wasm32" "$out/wasm32/bin"
+python3 -I - "$here/dist.base" "$tree/wasm32/bin" "$out/wasm32/bin" <<'PY'
+import os, shutil, sys
+lst, src, dst = sys.argv[1:]
+missing = []
+for l in open(lst):
+	for p in l.split('#')[0].split():
+		s = os.path.join(src, p)
+		if p.endswith('/') and os.path.isdir(s):
+			shutil.copytree(s, os.path.join(dst, p), dirs_exist_ok=True)
+		elif os.path.isfile(s):
+			os.makedirs(os.path.dirname(os.path.join(dst, p)), exist_ok=True)
+			shutil.copy2(s, os.path.join(dst, p))
+		else:
+			missing.append(p)
+if missing:
+	sys.exit('dist: not built (build/dist/build.log): ' + ' '.join(missing))
+PY
+cp -a "$tree/wasm32/lib" "$out/wasm32/"
+cp "$tree/wasm32/init" "$tree/wasm32/9wasm32.wasm" "$out/wasm32/"
+cp -a "$fat" "$out/wasm32/"
+# /dist/9front/.git, as 9front's git keeps a clone: the branch's objects in one pack, its refs
+# loose, HEAD on it, origin this repository, and INDEX9 - every file of it tracked, its qid not
+# yet known (git/walk looks at the file)
+g=$out/dist/9front/.git
+git init -q --template= "$out/dist/9front"
+git -C "$out/dist/9front" fetch -q --no-tags "$root" +refs/heads/tree:refs/remotes/origin/tree
+git -C "$out/dist/9front" repack -q -a -d
+c=$(git -C "$out/dist/9front" rev-parse refs/remotes/origin/tree)
+rm -rf "$g/logs" "$g/FETCH_HEAD" "$g/index" "$g/description" "$g/info" "$g/hooks" "$g/packed-refs" "$g/refs/tags"
+mkdir -p "$g/fs" "$g/refs/heads" "$g/refs/remotes/origin"
+echo "$c" >"$g/refs/remotes/origin/tree"
+echo "$c" >"$g/refs/heads/tree"
+echo 'ref: refs/heads/tree' >"$g/HEAD"
+printf '[remote "origin"]\n\turl=https://github.com/pereuna/plan9-wasm32\n' >"$g/config"
+git -C "$root" ls-tree -r --name-only tree | sed 's/^/T NOQID 0 /' >"$g/INDEX9"
+removed=$(git -C "$root" diff --name-only --diff-filter=D refs/9front/front tree | wc -l)
 # the proto: every file and directory, owned by sys as 9front's distproto has them (mkfs -U, the
 # installer's copydist, keeps the owners; the host's mean nothing to the machine's file server)
 python3 - "$out" "$d/proto" <<'PY'
@@ -89,7 +139,7 @@ with open(proto, 'w') as o:
 PY
 rm -f "$d/plan9-wasm32.iso"
 (cd "$d" && PATH=$PLAN9/bin:$PATH "$PLAN9/bin/dump9660" -M -c9j -p "$d/proto" -s "$out" -v 'Plan9-wasm32' "$d/plan9-wasm32.iso")
-echo "dist: $d/plan9-wasm32.iso ($(du -h "$d/plan9-wasm32.iso" | cut -f1)): $(find "$out/wasm32/bin" -type f | wc -l) programs, $removed off-topic files left out; $(wc -l <"$d/failed") build failures (build/dist/failed)"
+echo "dist: $d/plan9-wasm32.iso ($(du -h "$d/plan9-wasm32.iso" | cut -f1)): the tree $(git -C "$root" rev-parse --short tree) and its git, $(find "$out/wasm32/bin" -type f | wc -l) programs, $removed off-topic files left out; $(wc -l <"$d/failed") build failures here (build/dist/failed)"
 # the live image (as 9front's ISO boots): the page, the kernel, its boot file system and plan9.ini
 # - cdboot: /boot/init mounts the CD (iso=: the page's read-only disk, sdW1) as the root
 live=$d/live

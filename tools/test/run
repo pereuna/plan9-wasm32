@@ -23,6 +23,7 @@
 #   dp9iknoas, rcpu, rcpuask, secstore, seckeys
 # - the page's plan9.ini: pageini
 # - the install (build/dist: tools/dist): install, the live image, inst/start, the boot from the disk;
+#   dist, the distribution's own ISO installed, its git and a small build on the machine (only when named);
 #   isofile, the ISO from this computer (?iso=file)
 #   PLAN9=... tools/test/run [NAME...]	all without NAMEs
 set -e -o pipefail
@@ -187,11 +188,11 @@ fi
 # its ndb, the time zone, bootsetup - and fshalt -r; then the page again: it boots from
 # the disk's 9fat with the disk's own firmware (the loader), the root the installed hjfs, and fshalt
 # -r ends it.  Skipped without the distribution (PLAN9=... tools/dist)
+inst='[["Task to do", "\n"], ["File system", "hjfs\n"], ["Task to do", "\n"], ["Disk to partition", "sdW0\n"], ["mbr or gpt", "gpt\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["to subdivide", "\n"], ["esp as 9fat", "\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["Hjfs partition", "\n"], ["cache (MB)", "\n"], ["Ream the filesystem", "\n"], ["Task to do", "\n"], ["Configuration method", "\n"], ["Task to do", "\n"], ["Distribution disk", "\n"], ["Location of archives", "\n"], ["Task to do", "\n"], ["Task to do", "\n"], ["sysname", "\n"], ["Task to do", "\n"], ["Time Zone", "EET\n"], ["Task to do", "\n"], ["FAT partition", "/dev/sdW0/9fat\n"], ["EFI system partition", "no\n"], ["Task to do", "\n"]]'
 if want install $names; then
 	if [ -d "$root/build/dist/root" ]; then
 		"$here/iso" >/dev/null
 		gateway up
-		inst='[["Task to do", "\n"], ["File system", "hjfs\n"], ["Task to do", "\n"], ["Disk to partition", "sdW0\n"], ["mbr or gpt", "gpt\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["to subdivide", "\n"], ["esp as 9fat", "\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["Hjfs partition", "\n"], ["cache (MB)", "\n"], ["Ream the filesystem", "\n"], ["Task to do", "\n"], ["Configuration method", "\n"], ["Task to do", "\n"], ["Distribution disk", "\n"], ["Location of archives", "\n"], ["Task to do", "\n"], ["Task to do", "\n"], ["sysname", "\n"], ["Task to do", "\n"], ["Time Zone", "EET\n"], ["Task to do", "\n"], ["FAT partition", "/dev/sdW0/9fat\n"], ["EFI system partition", "no\n"], ["Task to do", "\n"]]'
 		SITE=$root/build/test/dist SENDWAIT=1800 HALTWAIT=1800 EXPECTJS="window.plan9firmware === 'disk'" \
 			THEN='["/bin/rc", "/boot/init", "echo bootargs $bootargs; ls -d /dist/9front /wasm32/bin/hjfs; sed 1q /adm/timezone/local; ea=`{cat /net/ether0/addr}; grep -c database /lib/ndb/local; ndb/query ether $ea sys; fshalt -r >/dev/null >[2=1]"]' \
 			run install '["/bin/rc", "/boot/init", ". /rc/bin/termrc; ramfs; inst/start"]' "$inst" '&noreboot=1&boot=disk'
@@ -209,6 +210,24 @@ if want isofile $names; then
 			run isofile '["/bin/rc", "-c", "{9660srv -s -f /dev/sdW1/data <[0=1] &} | echo 0 >/srv/iso; mount /srv/iso /root; ls -d /root/dist/9front /root/wasm32/9fat/index.html; sed -n 1p /dev/sdW1/ctl; echo done"]' '[]' '&iso=file'
 	else
 		echo "test: isofile: skipped (no build/dist: PLAN9=... tools/dist)"
+	fi
+fi
+# the distribution as a person installs it (docs/install.md): inst/start from its own ISO
+# (build/dist: tools/dist) on this computer (?iso=file) - the base system, the tools, the source
+# with its git - and on the disk: the source's git as 9front's sysupdate has it (bind -ac /dist/9front
+# /: the branch, origin's, the work tree clean), and a small build with the machine's own tools (mk,
+# 3c, 3l, yacc: echo and hoc from /sys/src/cmd, installed and run).  The whole system's build is
+# people's to run (cd /sys/src; mk install).  The ISO is large: only when named
+if [[ " $names " == *" dist "* ]]; then
+	if [ -e "$root/build/dist/plan9-wasm32.iso" ]; then
+		gateway up
+		then="bind -ac /dist/9front /; cd /; git/branch; cmp -s .git/refs/heads/tree .git/refs/remotes/origin/tree && echo the branch is at origin; git/fs; git/walk -q; echo walk status \$status; cd /sys/src/cmd; mk echo.install >/tmp/mk.log >[2=1] && echo built echo; /wasm32/bin/echo hello from echo built here; cd hoc; mk install >>/tmp/mk.log >[2=1] && echo built hoc; echo 2+3 | /wasm32/bin/hoc; fshalt -r >/dev/null >[2=1]"
+		SITE=$root/build/dist/live ISOFILE=$root/build/dist/plan9-wasm32.iso SENDWAIT=7200 HALTWAIT=7200 EXPECTJS="window.plan9firmware === 'disk'" \
+			THEN="$(rcjson "$then" | sed 's|^\["/bin/rc", "-c", |["/bin/rc", "/boot/init", |')" \
+			run dist '["/bin/rc", "/boot/init", ". /rc/bin/termrc; ramfs; inst/start"]' "$inst" '&noreboot=1&boot=disk&iso=file'
+		gateway down
+	else
+		echo "test: dist: skipped (no build/dist: PLAN9=... tools/dist)"
 	fi
 fi
 # no network (no gateway: the link down, no DHCP): no auth server, no tickets

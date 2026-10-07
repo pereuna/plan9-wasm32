@@ -195,8 +195,13 @@ if (fromdisk && !window.plan9firmware) {
 	}
 }
 if (fromdisk) pre.textContent += 'Plan9-wasm32 boots from the disk' + (window.plan9firmware === 'disk' ? ', its own firmware' : '') + '\n';
-/* ?iso=URL another, ?iso=file a local file the person chooses (nothing downloaded) */
-const iso = q.get('iso') ?? (fromdisk ? inival(fromdisk.conf, 'iso') : inival(ini, 'iso'));
+/*
+ * ?iso=URL another, ?iso=file a local file the person chooses (nothing downloaded) - to boot
+ * the live image and install from it: a machine that boots from its disk is not asked for it
+ * again (the page after the installer's fshalt -r has the same URL); ?boot=net boots the live
+ * image again
+ */
+const iso = q.get('iso') === 'file' && fromdisk ? null : q.get('iso') ?? (fromdisk ? inival(fromdisk.conf, 'iso') : inival(ini, 'iso'));
 const isofile = iso === 'file' ? await new Promise((done) => {
 	const d = document.getElementById('isopick'), f = d.querySelector('input');
 	d.classList.add('on');
