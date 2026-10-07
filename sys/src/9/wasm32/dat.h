@@ -7,6 +7,7 @@
 typedef struct Conf	Conf;
 typedef struct Confmem	Confmem;
 typedef struct FPsave	FPsave;
+typedef struct ISAConf	ISAConf;
 typedef struct PFPU	PFPU;
 typedef struct Label	Label;
 typedef struct Mach	Mach;
@@ -93,6 +94,22 @@ struct PMMU
 	long	hexit;		/* 1: the proc ended on its helper */
 	int	hdie;		/* a note ends it, on its helper */
 	vlong	hret;		/* the call's result */
+};
+
+/* a card's configuration, plan9.ini's ether0=type=wasm32 ea=... (isaconfig): port/devether.c's */
+#define NISAOPT		8
+struct ISAConf
+{
+	char	*type;
+	uvlong	port;
+	int	irq;
+	ulong	dma;
+	ulong	mem;
+	ulong	size;
+	ulong	freq;
+
+	int	nopt;
+	char	*opt[NISAOPT];
 };
 
 #define	inittxtflush(p)

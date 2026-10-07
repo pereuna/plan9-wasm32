@@ -13,15 +13,10 @@
  * key refuses the client.
  *
  * d4 -s addr: an rcpu server as 9front's /rc/bin/service/tcp17019 is one
- * (tlssrv -a, then rc reads the client's script), on a connection to
- * addr - tools/test/authsrv's relay joins it to the next rcpu client
- * (/17019), so the machine's own rcpu, unchanged, is the client: p9any as
- * the server (user bootes), TLS with the dp9ik secret, the script on 0
- * and 1.
- *
- * d4 -B dialstring bytes: that many bytes in writes of 4 MB (the most a
- * write takes) - devwsnet sends each in reserved pieces, so the page never holds much more than its Sendhigh
- * however large the write (the review's).
+ * (tlssrv -a, then rc reads the client's script), for one client that
+ * comes to addr (announce, listen) - the machine's own rcpu, unchanged,
+ * over its own IP address: p9any as the server (user bootes), TLS with
+ * the dp9ik secret, the script on 0 and 1.
  *
  * d4 -a: /proc/n/args written and read at once, by procs that come and
  * go - devproc takes the proc's debug lock and looks at its pid under
@@ -33,7 +28,7 @@
  * kill (exportfs's fatal: postnote(PNGROUP, ...)); none left after.
  */
 
-enum { Big = 1024*1024, Bwrite = 4*1024*1024 };
+enum { Big = 1024*1024 };
 
 static uchar psk[32];
 
@@ -156,7 +151,8 @@ wrongkey(void)
 static void
 rcpuserver(char *addr)
 {
-	int fd;
+	int afd, lfd, fd;
+	char adir[40], ldir[40];
 	AuthInfo *ai;
 	TLSconn *c;
 
@@ -167,8 +163,14 @@ rcpuserver(char *addr)
 	 * the connection on /mnt/term, which must go when the session does
 	 */
 	rfork(RFNOTEG|RFNAMEG);
-	if((fd = dial(addr, nil, nil, nil)) < 0)
-		sysfatal("dial %s: %r", addr);
+	if((afd = announce(addr, adir)) < 0)
+		sysfatal("announce %s: %r", addr);
+	if((lfd = listen(adir, ldir)) < 0)
+		sysfatal("listen %s: %r", adir);
+	if((fd = accept(lfd, ldir)) < 0)
+		sysfatal("accept %s: %r", ldir);
+	close(lfd);
+	close(afd);
 	/* tlssrv -a */
 	if((ai = auth_proxy(fd, nil, "proto=p9any role=server user=bootes")) == nil)
 		sysfatal("auth: %r");
@@ -329,29 +331,6 @@ main(int argc, char **argv)
 	}
 	if(argc == 3 && strcmp(argv[1], "-k") == 0){	/* the others: m(em) n(o handler) */
 		killgroup(RFPROC|RFNOWAIT|(strchr(argv[2], 'm') ? RFMEM : 0), strchr(argv[2], 'n') == nil);
-		exits(nil);
-	}
-
-	if(argc == 4 && strcmp(argv[1], "-B") == 0){
-		int fd;
-		long n;
-		uchar *b;
-
-		long m;
-
-		n = atol(argv[3]);
-		m = n < Bwrite ? n : Bwrite;
-		if((b = mallocz(m, 1)) == nil)
-			sysfatal("no memory for %ld", m);
-		if((fd = dial(argv[2], nil, nil, nil)) < 0)
-			sysfatal("dial %s: %r", argv[2]);
-		for(; n > 0; n -= m){
-			if(m > n)
-				m = n;
-			if(write(fd, b, m) != m)
-				sysfatal("write: %r");
-		}
-		print("written\n");
 		exits(nil);
 	}
 

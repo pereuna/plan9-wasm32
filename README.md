@@ -38,6 +38,14 @@ built for wasm32 (`docs/install.md`):
 `?iso=file` on the page boots a copy of the ISO on your own computer
 instead of the server's.
 
+The machine's network is an Ethernet card (`#l0`) whose wire is a
+WebSocket to the page's origin (`/ether`); `tools/serve` relays it to
+`tools/gateway`, the other end - a switch with a TAP device, 9front's
+DHCP, TCP and the rest over it (`docs/kernel.md`):
+
+    tools/gateway -n         # a network of its own, 10.0.2.0/24, DHCP; no root
+    tools/gateway -t tap0    # a TAP made by root, bridged or NATed to the LAN
+
 Try it: https://plan2001.com/plan9-wasm32/ (a live image, as 9front's ISO:
 `inst/start` installs onto the browser's disk; `?iso=file` reads a copy of
 the ISO on your own computer).
@@ -55,9 +63,10 @@ on PATH), each test the machine's serial console against
 
 `tools/test/run` lists the tests.  A failure leaves the machine's output
 in `build/test/NAME.txt`, the page's log in `NAME.log`, and the screen in
-`NAME.png`.  The network tests talk to `tools/test/authsrv`, a stand-in
-for the origin's gateway with a dp9ik auth server, secstore and an rcpu
-relay.  A new test is a program or an rc line in `tools/test/run` and its
+`NAME.png`.  The network tests run `tools/gateway -n`, and in its
+network `tools/test/authsrv` on 10.0.2.2: a dp9ik auth server and secstore
+(unprivileged user namespaces and `/dev/net/tun`; `ip` from iproute2).
+A new test is a program or an rc line in `tools/test/run` and its
 expected output; the output's first line is `ticks in it: ok` with a
 `\r\n` (the kernel's console), the others end in `\n`.
 

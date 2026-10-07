@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""The machine's network gateway: its Ethernet card (etherwasm32.c) is a
+WebSocket to the page's origin (GET /ether, a frame a binary message each
+way; tools/serve's relay brings the page's here), and this is the other
+end of the wire - a switch, as a virtual machine's host has: each
+machine a port of it, and a TAP device another, its frames those of the
+host's network.  The switch learns where each address is and floods the
+rest, so machines on it reach each other as on a LAN.
+
+  -n  a network of its own, no root needed: a user and network namespace
+      with tap0 in it, 10.0.2.2/24 (as QEMU's user network: the machine
+      10.0.2.15 and up), and a DHCP server here for the machines - their
+      address, mask and gateway, and 10.0.2.2 as their auth server
+      (Plan 9's DHCP option, ipconfig's auth=).  CMD after -- runs in
+      that namespace (the tests' services: tools/test/authsrv 10.0.2.2)
+  -t NAME  a TAP device already made, e.g. one bridged or NATed to the
+      host's LAN (ip tuntap add NAME mode tap user $USER, as root): its
+      network's DHCP, not this one's
+  -d  the DHCP server with -t too (10.0.2.0/24 on that TAP)
+
+  tools/gateway [-p PORT] (-n | -t NAME [-d]) [-- CMD...]	PORT 17080
+"""
+import asyncio, base64, ctypes, fcntl, hashlib, ipaddress, os, socket, struct, subprocess, sys
+
+port = 17080
+tapname = None
+ownnet = False
+dhcp = False
+cmd = []
+a = sys.argv[1:]
+while a:
+	if a[0] == '-p':
+		port = int(a[1]); a = a[2:]
+	elif a[0] == '-t':
+		tapname = a[1]; a = a[2:]
+	elif a[0] == '-n':
+		ownnet = dhcp = True; a = a[1:]
+	elif a[0] == '-d':
+		dhcp = True; a = a[1:]
+	elif a[0] == '--':
+		cmd = a[1:]; a = []
+	else:
+		sys.exit(__doc__)
+if ownnet == (tapname is not None):
+	sys.exit(__doc__)
+
+NET = ipaddress.IPv4Network('10.0.2.0/24')
+GW = ipaddress.IPv4Address('10.0.2.2')
+FIRST = 15
+BCAST = b'\xff' * 6
+
+def log(*a):
+	print('gateway:', *a, file=sys.stderr, flush=True)
+
+# the WebSocket listener first, in the host's network: the namespace after it is the TAP's
+lsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+lsock.bind(('127.0.0.1', port))
+lsock.listen(64)
+
+if ownnet:
+	uid, gid = os.getuid(), os.getgid()
+	os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNET)
+	with open('/proc/self/setgroups', 'w') as f:
+		f.write('deny')
+	with open('/proc/self/uid_map', 'w') as f:
+		f.write(f'0 {uid} 1')
+	with open('/proc/self/gid_map', 'w') as f:
+		f.write(f'0 {gid} 1')
+	tapname = 'tap0'
+
+TUNSETIFF, IFF_TAP, IFF_NO_PI = 0x400454ca, 0x0002, 0x1000
+tap = os.open('/dev/net/tun', os.O_RDWR | os.O_NONBLOCK)
+fcntl.ioctl(tap, TUNSETIFF, struct.pack('16sH', tapname.encode(), IFF_TAP | IFF_NO_PI))
+if ownnet:
+	for c in (['ip', 'link', 'set', 'lo', 'up'], ['ip', 'link', 'set', 'tap0', 'up'], ['ip', 'addr', 'add', f'{GW}/{NET.prefixlen}', 'dev', 'tap0']):
+		subprocess.run(c, check=True)
+log(f'ws://127.0.0.1:{port}/ether, {tapname}' + (f' {GW}/{NET.prefixlen}' if ownnet else '') + (', DHCP' if dhcp else ''))
+
+class Port:
+	def __init__(self, name, send):
+		self.name = name
+		self.send = send
+
+where = {}	# a MAC address -> the port it was last seen on
+ports = []
+
+def switch(src, f):
+	if len(f) < 14:
+		return
+	where[f[6:12]] = src
+	if dhcp and dhcpin(src, f):
+		return
+	dst = where.get(f[0:6]) if f[0] & 1 == 0 else None
+	if dst is not None:
+		if dst is not src:
+			dst.send(f)
+		return
+	for p in ports:
+		if p is not src:
+			p.send(f)
+
+# DHCP (RFC 2131) for the machines: an address each by its MAC, kept while this runs
+leases = {}
+gwmac = bytes.fromhex('525400000202')
+
+def csum(b):
+	if len(b) % 2:
+		b += b'\0'
+	s = sum(struct.unpack(f'!{len(b)//2}H', b))
+	while s >> 16:
+		s = (s & 0xffff) + (s >> 16)
+	return ~s & 0xffff
+
+def dhcpin(src, f):
+	if f[12:14] != b'\x08\x00' or len(f) < 14 + 20 + 8 + 240:
+		return False
+	ip = f[14:]
+	ihl = (ip[0] & 15) * 4
+	if ip[9] != 17:
+		return False
+	udp = ip[ihl:]
+	if struct.unpack('!H', udp[2:4])[0] != 67:
+		return False
+	b = udp[8:]
+	if b[0] != 1 or b[236:240] != b'\x63\x82\x53\x63':
+		return True
+	opts, i = {}, 240
+	while i < len(b) and b[i] != 255:
+		if b[i] == 0:
+			i += 1
+			continue
+		opts[b[i]] = b[i+2:i+2+b[i+1]]
+		i += 2 + b[i+1]
+	t = opts.get(53, b'\0')[0]
+	mac = b[28:34]
+	if mac not in leases:
+		n = FIRST + len(leases)
+		if n >= NET.num_addresses - 1:
+			log('dhcp: no addresses left')
+			return True
+		leases[mac] = NET.network_address + n
+	yi = leases[mac]
+	if t == 1:
+		reply = 2	# offer
+	elif t == 3:
+		want = opts.get(50) or b[12:16]
+		reply = 5 if want in (yi.packed, b'\0'*4) else 6	# ack, nak
+	else:
+		return True
+	log(f'dhcp: {mac.hex()} {"offer" if reply == 2 else "ack" if reply == 5 else "nak"} {yi}')
+	vend = bytes([129, 4]) + GW.packed	# Plan 9's: its auth server (ipconfig: auth=)
+	o = bytes([53, 1, reply, 54, 4]) + GW.packed
+	if reply != 6:
+		o += bytes([51, 4]) + struct.pack('!I', 86400) + bytes([1, 4]) + NET.netmask.packed + bytes([3, 4]) + GW.packed + bytes([43, len(vend)]) + vend
+	o += b'\xff'
+	bootp = bytes([2, 1, 6, 0]) + b[4:8] + b'\0\0' + b[10:12] + b'\0'*4 + (yi.packed if reply != 6 else b'\0'*4) + GW.packed + b'\0'*4 + b[28:44] + b'\0'*192 + b'\x63\x82\x53\x63' + o
+	udpl = 8 + len(bootp)
+	u = struct.pack('!HHHH', 67, 68, udpl, 0) + bootp
+	dstip = b'\xff'*4
+	ph = GW.packed + dstip + struct.pack('!BBH', 0, 17, udpl)
+	c = csum(ph + u) or 0xffff
+	u = u[:6] + struct.pack('!H', c) + u[8:]
+	h = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + udpl, 0, 0, 64, 17, 0, GW.packed, dstip)
+	h = h[:10] + struct.pack('!H', csum(h)) + h[12:]
+	src.send(BCAST + gwmac + b'\x08\x00' + h + u)
+	return True
+
+# the TAP: a port of the switch
+def tapsend(f):
+	try:
+		os.write(tap, f)
+	except (BlockingIOError, OSError):
+		pass	# full or down: dropped, as a wire would
+
+tapport = Port(tapname, tapsend)
+ports.append(tapport)
+
+def tapread():
+	while True:
+		try:
+			f = os.read(tap, 65536)
+		except BlockingIOError:
+			return
+		switch(tapport, f)
+
+# a machine: a WebSocket (RFC 6455), a frame a binary message
+async def machine(r, w):
+	try:
+		head = await r.readuntil(b'\r\n\r\n')
+	except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
+		w.close()
+		return
+	lines = head.decode('latin1').split('\r\n')
+	path = lines[0].split()[1] if len(lines[0].split()) > 1 else ''
+	hdr = {l.split(':', 1)[0].strip().lower(): l.split(':', 1)[1].strip() for l in lines[1:] if ':' in l}
+	if path.split('?')[0] != '/ether' or 'sec-websocket-key' not in hdr:
+		w.write(b'HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n')
+		w.close()
+		return
+	acc = base64.b64encode(hashlib.sha1((hdr['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+	w.write(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+		f'Sec-WebSocket-Accept: {acc}\r\n\r\n').encode())
+	def send(f):
+		if w.transport.get_write_buffer_size() > 1024*1024:
+			return	# a machine that does not keep up: dropped
+		n = len(f)
+		w.write((bytes([0x82, n]) if n < 126 else bytes([0x82, 126]) + struct.pack('>H', n)) + f)
+	me = Port(f'ws{id(w):x}', send)
+	ports.append(me)
+	log(f'{me.name}: a machine')
+	try:
+		frag = bytearray()
+		while True:
+			b0, b1 = await r.readexactly(2)
+			n = b1 & 0x7f
+			if n == 126:
+				n = struct.unpack('>H', await r.readexactly(2))[0]
+			elif n == 127:
+				n = struct.unpack('>Q', await r.readexactly(8))[0]
+			if n > 65536:
+				break
+			mask = await r.readexactly(4) if b1 & 0x80 else b'\0'*4
+			data = await r.readexactly(n)
+			if n:
+				data = (int.from_bytes(data, 'big') ^ int.from_bytes((mask * (n // 4 + 1))[:n], 'big')).to_bytes(n, 'big')
+			op = b0 & 0x0f
+			if op == 8:
+				break
+			if op == 9:
+				w.write(bytes([0x8a, len(data)]) + data)
+				continue
+			if op not in (0, 2):
+				continue
+			frag.extend(data)
+			if b0 & 0x80:
+				switch(me, bytes(frag))
+				frag.clear()
+	except (asyncio.IncompleteReadError, ConnectionError):
+		pass
+	finally:
+		ports.remove(me)
+		for k in [k for k, v in where.items() if v is me]:
+			del where[k]
+		log(f'{me.name}: gone')
+		w.close()
+
+async def main():
+	loop = asyncio.get_running_loop()
+	loop.add_reader(tap, tapread)
+	srv = await asyncio.start_server(machine, sock=lsock)
+	child = None
+	if cmd:
+		# it ends with this (PR_SET_PDEATHSIG)
+		prctl = ctypes.CDLL(None, use_errno=True).prctl
+		child = await asyncio.create_subprocess_exec(*cmd, preexec_fn=lambda: prctl(1, 15))
+	async with srv:
+		if child:
+			await asyncio.gather(srv.serve_forever(), child.wait())
+		else:
+			await srv.serve_forever()
+
+try:
+	asyncio.run(main())
+except KeyboardInterrupt:
+	pass

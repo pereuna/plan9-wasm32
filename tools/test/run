@@ -18,9 +18,9 @@
 # - the disk (#S/sdW0, OPFS, kept across a reload): disk, diskdead
 # - libraries: crypto (libsec, libmp, libauthsrv), tls (devtls)
 # - WebAuthn (#ω): webauthn (the browser's virtual authenticator)
-# - the network, against tools/test/authsrv (the auth server, secstore,
-#   an rcpu relay): dp9ik, dp9iknoas, nettimeout, netre, rcpu, rcpuask,
-#   secstore, seckeys, sendq (backpressure)
+# - the network (#l/ether0 to tools/gateway -n: DHCP, the auth server
+#   and secstore of tools/test/authsrv on 10.0.2.2): ether, dp9ik,
+#   dp9iknoas, rcpu, rcpuask, secstore, seckeys
 # - the page's plan9.ini: pageini
 # - the install (build/dist: tools/dist): install, the live image, inst/start, the boot from the disk;
 #   isofile, the ISO from this computer (?iso=file)
@@ -133,61 +133,69 @@ want webauthn $names && PAGEHOST=localhost WEBAUTHN='["go", "go", "go", "go", "g
 want pageini $names && PLAN9INI='secstore=tcp!relay!5356' run pageini '["/bin/rc", "-c", "echo secstore $secstore; echo done"]'
 want pageini $names && run pageini0 '["/bin/rc", "-c", "echo secstore $secstore; echo done"]'
 
-# the network: tools/test/authsrv on the port tools/serve's relay goes to (GATEWAY): dp9ik's auth
-# server (/567), secstore (/5356), an rcpu relay inside one machine (/17019 to /17999)
-if want dp9ik $names || want netre $names || want rcpu $names || want rcpuask $names || want nettimeout $names || want sendq $names || want secstore $names || want seckeys $names; then
-	"$here/authsrv" 18099 glenda=gpassword bootes=bpassword secstore:glenda=spassword >"$root/build/test/authsrv.log" 2>&1 &
-	aspid=$!
-	trap 'kill $aspid 2>/dev/null' EXIT
-	export GATEWAY=18099
-	fkeys="mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl"
+# the network: the machine's Ethernet to tools/gateway -n on the port tools/serve's relay goes to
+# (GATEWAY) - a network of its own, 10.0.2.0/24, DHCP - and in it tools/test/authsrv on 10.0.2.2: the
+# auth server (567) and secstore (5356).  Each test configures its card as 9front's termrc does
+# (ip/ipconfig: DHCP, auth= from it) and starts cs
+gateway() {	# up or down
+	if [ $1 = up ]; then
+		"$root/tools/gateway" -p 18099 -n -- "$here/authsrv" 10.0.2.2 glenda=gpassword bootes=bpassword secstore:glenda=spassword >>"$root/build/test/gateway.log" 2>&1 &
+		gwpid=$!
+		trap 'kill $gwpid 2>/dev/null' EXIT
+		export GATEWAY=18099
+	else
+		kill $gwpid; wait $gwpid 2>/dev/null || true; trap - EXIT
+		unset GATEWAY
+	fi
+}
+rm -f "$root/build/test/gateway.log"
+if want ether $names || want dp9ik $names || want rcpu $names || want rcpuask $names || want secstore $names || want seckeys $names; then
+	gateway up
+	inet="ip/ipconfig; ndb/cs"
+	fkeys="$inet; mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl"
+	# the card: 9front's devether and IP stack over it - DHCP's address on the gateway's network, its
+	# auth server in /net/ndb, the gateway answers a ping
+	want ether $names && HALTWAIT=120 run ether "$(rcjson "ls -d /net/ether0 /net/tcp; $inet; ~ \`{sed -n 's/^ip=(10\.0\.2\.)[0-9]+ .*/\1/p' /net/ndb} 10.0.2. && echo an address from DHCP; sed -n 's/^.*(auth=[^ ]*).*$/\1/p' /net/ndb; ip/ping -q -n 3 10.0.2.2 >/dev/null && echo the gateway answers; ls /net/cs; echo done")"
 	# dp9ik through factotum: glenda and bootes over a pipe, the tickets from the auth server; a wrong
 	# password gives needkey
 	want dp9ik $names && HALTWAIT=120 run dp9ik "$(rcjson "$fkeys; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; d3 -p cirno; echo 'delkey user=glenda' >/mnt/factotum/ctl; echo 'key proto=dp9ik dom=cirno user=glenda !password=wrong' >/mnt/factotum/ctl; d3 -p cirno; echo done")"
-	# a connect whose WebSocket never opens (authsrv's /17998) gives up after 60 s
-	want nettimeout $names && HALTWAIT=150 run nettimeout '["/bin/rc", "-c", "{echo connect relay!17998 >[1=0]} <>/net/tcp/clone; echo status $status; echo done"]'
-	# /net/tcp reconnected: a gen each connect, a reader woken by a hangup (d3 -n)
-	want netre $names && HALTWAIT=300 run netre '["/bin/rc", "-c", "d3 -n 20 4; echo done"]'
 	# rcpu, the machine's own (rcpu, rconnect, tlsclient -a, exportfs) to an rcpu server in the same
-	# machine (d4 -s: tlssrv -a and tcp17019's script) through authsrv's relay: bootes's factotum in its
-	# own namespace, glenda's here - her key given, or asked for on the console (rcpuask: auth_getkey,
-	# /boot/factotum -g).  exportfs says "short write" when the server has gone at the end: left out
-	rsrv="mntgen -s slashmnt /mnt; @{rfork n; auth/factotum -n; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; exec d4 -s tcp!relay!17999} & auth/factotum -n -sfactotum"
-	rcmd="rcpu -h relay -c 'echo remote: service \$service; cat /mnt/term/env/sysname; echo; ls /mnt/term/boot; test -e /mnt/term/dev/draw/new && echo the terminal draws; echo remote done'"
+	# machine (d4 -s: tlssrv -a and tcp17019's script, listening on 17019) over its own address: bootes's
+	# factotum in its own namespace, glenda's here - her key given, or asked for on the console (rcpuask:
+	# auth_getkey, /boot/factotum -g).  exportfs says "short write" when the server has gone at the end: left out
+	rsrv="$inet; mntgen -s slashmnt /mnt; @{rfork n; auth/factotum -n; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; exec d4 -s tcp!*!17019} & auth/factotum -n -sfactotum; me=\`{sed -n 's/^ip=([^ ]+).*/\1/p' /net/ndb}"
+	rcmd="rcpu -h \$me -c 'echo remote: service \$service; cat /mnt/term/env/sysname; echo; ls /mnt/term/boot; test -e /mnt/term/dev/draw/new && echo the terminal draws; echo remote done'"
 	want rcpu $names && HALTWAIT=150 run rcpu "$(rcjson "$rsrv; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; sleep 2; $rcmd >[2=1] | sed '/short write in reply/d'; echo rcpu status \$status; echo done")"
 	want rcpuask $names && HALTWAIT=150 run rcpuask "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; $rsrv; sleep 2; {$rcmd >[2=1] | sed '/short write in reply/d'} </dev/cons >/dev/cons >[2=1]; {echo rcpu status \$status; cat /mnt/factotum/ctl; echo done} >/dev/cons")" \
 		'[["user[glenda]: ", "\n"], ["password: ", "gpassword\n"]]'
-	# backpressure: one write of 24 MB (d4 -B; less goes into the host's socket buffers) to a WebSocket that reads nothing (authsrv's /9) - the kernel
-	# reserves each 64 KiB piece in the page before it sends it, so the page holds at most Sendhigh and a
-	# piece and the writer waits
-	want sendq $names && HALTWAIT=60 EXPECTJS='window.plan9.sendqmax > 900000 && window.plan9.sendqmax <= 1114112' \
-		run sendq '["/bin/rc", "-c", "d4 -B tcp!relay!9 24000000 & sleep 8; echo the writer waits; echo done"]'
 	# factotum's keys from secstore: glenda's dp9ik key and a mail password put with secstore -p
-	# (encrypted with her secstore password; authsrv's /5356 keeps them as they came), then /boot/secstore
+	# (encrypted with her secstore password; authsrv's secstore keeps them as they came), then /boot/secstore
 	# (/boot/init's) gets them into factotum - a wrong password first, asked again
-	want secstore $names && HALTWAIT=150 run secstore "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; {$fkeys; ramfs -m /mnt/ram; cd /mnt/ram; {echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword'; echo 'key proto=pass service=mail user=glenda !password=mpassword'} >factotum; echo spassword | auth/secstore -i -s tcp!relay!5356 -p factotum >[2=1]; rm factotum; echo before:; cat /mnt/factotum/ctl; secstore=tcp!relay!5356 rc /boot/secstore; echo after:; cat /mnt/factotum/ctl; echo done} </dev/cons >/dev/cons >[2=1]")" \
+	want secstore $names && HALTWAIT=150 run secstore "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; {$fkeys; ramfs -m /mnt/ram; cd /mnt/ram; {echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword'; echo 'key proto=pass service=mail user=glenda !password=mpassword'} >factotum; echo spassword | auth/secstore -i -s tcp!10.0.2.2!5356 -p factotum >[2=1]; rm factotum; echo before:; cat /mnt/factotum/ctl; secstore=tcp!10.0.2.2!5356 rc /boot/secstore; echo after:; cat /mnt/factotum/ctl; echo done} </dev/cons >/dev/cons >[2=1]")" \
 		'[["secstore password: ", "wrong\n"], ["secstore password: ", "spassword\n"]]'
 	# the keys' copy on the machine's disk (aux/seckeys, /boot/secstore): from secstore with the disk, the
-	# copy is in glenda's home - aescbc's, not the keys; then without secstore (authsrv refuses /5399:
-	# the dial fails) the keys from the copy, a wrong password first
-	sk="secstore=tcp!relay!5356 rc /boot/secstore; read -c 16 /usr/glenda/lib/factotum.aes; echo 'delkey user=glenda' >/mnt/factotum/ctl; secstore=tcp!relay!5399 rc /boot/secstore; cat /mnt/factotum/ctl"
-	want seckeys $names && HALTWAIT=200 run seckeys "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; {$fkeys; mntgen -s slashn /n; rc /boot/disk; ramfs -m /mnt/ram; cd /mnt/ram; {echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword'; echo 'key proto=pass service=mail user=glenda !password=mpassword'} >factotum; echo spassword | auth/secstore -i -s tcp!relay!5356 -p factotum >[2=1]; rm factotum; $sk; echo done} </dev/cons >/dev/cons >[2=1]")" \
+	# copy is in glenda's home - aescbc's, not the keys; then without secstore (nothing on 5399: the dial
+	# is refused) the keys from the copy, a wrong password first
+	sk="secstore=tcp!10.0.2.2!5356 rc /boot/secstore; read -c 16 /usr/glenda/lib/factotum.aes; echo 'delkey user=glenda' >/mnt/factotum/ctl; secstore=tcp!10.0.2.2!5399 rc /boot/secstore; cat /mnt/factotum/ctl"
+	want seckeys $names && HALTWAIT=200 run seckeys "$(rcjson "aux/kbdfs -q -s cons /dev/eia0; {$fkeys; mntgen -s slashn /n; rc /boot/disk; ramfs -m /mnt/ram; cd /mnt/ram; {echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword'; echo 'key proto=pass service=mail user=glenda !password=mpassword'} >factotum; echo spassword | auth/secstore -i -s tcp!10.0.2.2!5356 -p factotum >[2=1]; rm factotum; $sk; echo done} </dev/cons >/dev/cons >[2=1]")" \
 		'[["secstore password: ", "spassword\n"], ["secstore password: ", "wrong\n"], ["secstore password: ", "spassword\n"]]'
-	kill $aspid; trap - EXIT
-	unset GATEWAY
+	gateway down
 fi
 # installed as 9front is (docs/install.md): the live image of a small distribution (tools/test/iso:
 # what the installer, termrc and rio run), inst/start on the console - hjfs, GPT, prep's 9fat, the
-# distribution copied, the time zone, bootsetup - and fshalt -r; then the page again: it boots from
+# network (ether0, DHCP from the gateway's), the distribution copied, the machine's name and card in
+# its ndb, the time zone, bootsetup - and fshalt -r; then the page again: it boots from
 # the disk's 9fat with the disk's own firmware (the loader), the root the installed hjfs, and fshalt
 # -r ends it.  Skipped without the distribution (PLAN9=... tools/dist)
 if want install $names; then
 	if [ -d "$root/build/dist/root" ]; then
 		"$here/iso" >/dev/null
-		inst='[["Task to do", "\n"], ["File system", "hjfs\n"], ["Task to do", "\n"], ["Disk to partition", "sdW0\n"], ["mbr or gpt", "gpt\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["to subdivide", "\n"], ["esp as 9fat", "\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["Hjfs partition", "\n"], ["cache (MB)", "\n"], ["Ream the filesystem", "\n"], ["Task to do", "\n"], ["Task to do", "\n"], ["Distribution disk", "\n"], ["Location of archives", "\n"], ["Task to do", "\n"], ["Task to do", "\n"], ["Time Zone", "EET\n"], ["Task to do", "\n"], ["FAT partition", "/dev/sdW0/9fat\n"], ["EFI system partition", "no\n"], ["Task to do", "\n"]]'
+		gateway up
+		inst='[["Task to do", "\n"], ["File system", "hjfs\n"], ["Task to do", "\n"], ["Disk to partition", "sdW0\n"], ["mbr or gpt", "gpt\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["to subdivide", "\n"], ["esp as 9fat", "\n"], [">>> ", "w\n"], [">>> ", "q\n"], ["Task to do", "\n"], ["Hjfs partition", "\n"], ["cache (MB)", "\n"], ["Ream the filesystem", "\n"], ["Task to do", "\n"], ["Configuration method", "\n"], ["Task to do", "\n"], ["Distribution disk", "\n"], ["Location of archives", "\n"], ["Task to do", "\n"], ["Task to do", "\n"], ["sysname", "\n"], ["Task to do", "\n"], ["Time Zone", "EET\n"], ["Task to do", "\n"], ["FAT partition", "/dev/sdW0/9fat\n"], ["EFI system partition", "no\n"], ["Task to do", "\n"]]'
 		SITE=$root/build/test/dist SENDWAIT=1800 HALTWAIT=1800 EXPECTJS="window.plan9firmware === 'disk'" \
-			THEN='["/bin/rc", "/boot/init", "echo bootargs $bootargs; ls -d /dist/9front /wasm32/bin/hjfs; sed 1q /adm/timezone/local; fshalt -r >/dev/null >[2=1]"]' \
+			THEN='["/bin/rc", "/boot/init", "echo bootargs $bootargs; ls -d /dist/9front /wasm32/bin/hjfs; sed 1q /adm/timezone/local; ea=`{cat /net/ether0/addr}; grep -c database /lib/ndb/local; ndb/query ether $ea sys; fshalt -r >/dev/null >[2=1]"]' \
 			run install '["/bin/rc", "/boot/init", ". /rc/bin/termrc; ramfs; inst/start"]' "$inst" '&noreboot=1&boot=disk'
+		gateway down
 	else
 		echo "test: install: skipped (no build/dist: PLAN9=... tools/dist)"
 	fi
@@ -203,7 +211,7 @@ if want isofile $names; then
 		echo "test: isofile: skipped (no build/dist: PLAN9=... tools/dist)"
 	fi
 fi
-# no auth server (the gateway refuses): no tickets
-want dp9iknoas $names && GATEWAY=18098 HALTWAIT=120 run dp9iknoas "$(rcjson "mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; d3 -p cirno; echo done")"
+# no network (no gateway: the link down, no DHCP): no auth server, no tickets
+want dp9iknoas $names && GATEWAY=18098 HALTWAIT=120 run dp9iknoas "$(rcjson "ndb/cs; mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; d3 -p cirno; echo done")"
 [ -z "$failed" ] || { echo "test: failed:$failed"; exit 1; }
 echo "test: ok"

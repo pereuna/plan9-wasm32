@@ -221,16 +221,16 @@ boot(fromdisk ? fromdisk.kernel : '9wasm32.wasm', {
 	touchbutton: () => touchbutton,
 	screen: (([w, h]) => ({ w: Number(w) || ((q.get('console') === '1') ? 800 : innerWidth), h: Number(h) || ((q.get('console') === '1') ? 600 : innerHeight - barh) }))((q.get('screen') ?? '').split('x')),
 	/*
-	 * the machine's network: this origin's own gateway, nothing a URL can
-	 * change (a page pointed elsewhere would be a man in the middle).
-	 * https: wss on this host; http only on loopback, the next port
-	 * (tools/serve's relay: offline and the tests)
+	 * the machine's network: this origin's own gateway (its Ethernet's
+	 * frames: /ether), nothing a URL can change (a page pointed elsewhere
+	 * would be a man in the middle).  https: wss on this host; http only
+	 * on loopback, the next port (tools/serve's relay: offline and the
+	 * tests)
 	 */
 	ws: location.protocol === 'https:' ? `wss://${location.host}`
 		: /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname) ? `ws://${location.hostname}:${location.port ? +location.port + 1 : 8081}`
 		: 'ws://0.0.0.0:0',	/* none */
 	failfork: Number(q.get('failfork')) || 0,
-	ringstart: Number(q.get('ringstart')) || 0,	/* a test's: the network rings' counters start there */
 	failhelper: Number(q.get('failhelper')) || 0,
 	failrfmem: Number(q.get('failrfmem')) || 0,
 	bad: q.get('bad'),	/* a test's: a BootInfo the kernel must refuse (arch, rd, fb; platform.js) */

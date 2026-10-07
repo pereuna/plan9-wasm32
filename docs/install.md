@@ -39,8 +39,15 @@ glenda's profile, rio.  The live system is a guest: nothing is written.
   system (OPFS, 4 GB by default, `?disk=MB`); `gpt`, then edisk's
   suggestion (`w`, `q`): esp and plan9.
 - **prepdisk**: prep's suggestion: 9fat, nvram, fs (or the esp as 9fat).
-- **mountfs**, **mountdist** (`/`: the live root), **copydist** (the whole
-  distribution, from the ISO onto the disk), **tzsetup**.
+- **mountfs**.
+- **confignet**: the Ethernet card, `/net/ether0` (`docs/kernel.md`):
+  automatic (DHCP from the gateway's network) or manual.
+- **mountdist** (`/`: the live root), **copydist** (the whole
+  distribution, from the ISO onto the disk).
+- **ndbsetup**: the machine's name and its card's address in the
+  installed `/lib/ndb/local`, so that termrc configures it when it boots
+  (the address is the browser's, the same each time).
+- **tzsetup**.
 - **bootsetup**: the boot FAT (9fat, or the esp) gets plan9.ini
   (`bootfile=9wasm32.wasm`, `bootargs=local!/dev/sdW0/fs ...`), the kernel
   and `/wasm32/9fat`: the kernel's boot file system (`9wasm32.fs`) and the

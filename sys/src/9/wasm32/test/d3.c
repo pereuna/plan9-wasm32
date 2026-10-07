@@ -16,15 +16,10 @@
  * d3 -p: dp9ik end to end through factotum - a client (user glenda) and
  * a server (user bootes) authenticate over a pipe with p9any (auth_proxy
  * on both sides); the users differ, so the client's factotum must get
- * the tickets from the auth server (net!p9auth.dom!ticket: /net/cs, a
- * WebSocket, tools/test/authsrv or the CPU VM's) - it makes them itself
- * only for the same user.  The two get the same AuthInfo and secret.
- *
- * d3 -n rounds procs: /net/tcp reconnected - each proc connects one
- * conversation to the auth server again and again (connect, an AuthPAK
- * request, the answer, hangup on the same ctl): every answer whole,
- * AuthOK and a PAK y, none another connection's; and a reader waiting in
- * data wakes when another proc hangs up.
+ * the tickets from the auth server (ndb/cs: the auth= DHCP gave,
+ * tools/test/authsrv on the gateway's network, or the CPU VM's) - it
+ * makes them itself only for the same user.  The two get the same
+ * AuthInfo and secret.
  *
  * d3 -r host: dp9ik with 9front itself - glenda authenticates to the CPU
  * VM's rcpu (p9any: its factotum, its auth server) and gets her AuthInfo.
@@ -242,106 +237,6 @@ proxy(char *dom)
 	auth_freeAI(ai);
 }
 
-static int
-pakreq(int data)
-{
-	Ticketreq tr;
-	char buf[TICKREQLEN];
-	uchar y[1+PAKYLEN];
-	int n;
-
-	memset(&tr, 0, sizeof tr);
-	tr.type = AuthPAK;
-	strcpy(tr.authid, "bootes");
-	strcpy(tr.authdom, "cirno");
-	strcpy(tr.hostid, "glenda");
-	strcpy(tr.uid, "glenda");
-	n = convTR2M(&tr, buf, sizeof buf);
-	if(write(data, buf, n) != n)
-		return -1;
-	if(readn(data, y, sizeof y) != sizeof y || y[0] != AuthOK)
-		return -1;
-	return 0;
-}
-
-static int
-conn(int ctl, char *dir)
-{
-	char buf[64];
-	int data;
-
-	if(fprint(ctl, "connect p9auth.cirno!567") < 0)
-		return -1;
-	snprint(buf, sizeof buf, "%s/data", dir);
-	if((data = open(buf, ORDWR)) < 0)
-		return -1;
-	return data;
-}
-
-static void
-reconnect(int rounds, int procs)
-{
-	char dir[40], buf[16];
-	int i, j, ctl, data, n, bad;
-
-	for(j = 0; j < procs; j++){
-		switch(fork()){
-		case -1:
-			sysfatal("fork: %r");
-		case 0:
-			if((ctl = open("/net/tcp/clone", ORDWR)) < 0 || (n = read(ctl, buf, sizeof buf-1)) <= 0)
-				sysfatal("clone: %r");
-			buf[n] = 0;
-			snprint(dir, sizeof dir, "/net/tcp/%d", atoi(buf));
-			bad = 0;
-			for(i = 0; i < rounds; i++){
-				if((data = conn(ctl, dir)) < 0 || pakreq(data) < 0)
-					bad++;
-				if(data >= 0)
-					close(data);
-				fprint(ctl, "hangup");
-			}
-			close(ctl);
-			if(bad)
-				print("proc %d: %d of %d rounds bad: %r\n", j, bad, rounds);
-			exits(bad ? "bad" : nil);
-		}
-	}
-	bad = 0;
-	for(j = 0; j < procs; j++){
-		Waitmsg *w = wait();
-		if(w == nil || w->msg[0])
-			bad++;
-		free(w);
-	}
-	print("reconnect: %d procs, %d rounds each, %d bad\n", procs, rounds, bad);
-
-	/* a reader waiting in data wakes when another proc hangs up */
-	if((ctl = open("/net/tcp/clone", ORDWR)) < 0 || (n = read(ctl, buf, sizeof buf-1)) <= 0)
-		sysfatal("clone: %r");
-	buf[n] = 0;
-	snprint(dir, sizeof dir, "/net/tcp/%d", atoi(buf));
-	if((data = conn(ctl, dir)) < 0)
-		sysfatal("connect: %r");
-	switch(fork()){
-	case -1:
-		sysfatal("fork: %r");
-	case 0:
-		sleep(1000);
-		fprint(ctl, "hangup");
-		exits(nil);
-	}
-	n = read(data, buf, sizeof buf);
-	waitpid();
-	print("reader after hangup: read %d\n", n);
-	/* and the conversation connects again */
-	close(data);
-	if((data = conn(ctl, dir)) < 0 || pakreq(data) < 0)
-		print("again: %r\n");
-	else
-		print("connected again\n");
-}
-
 static void
 rcpu(char *host)
 {
@@ -365,10 +260,6 @@ main(int argc, char **argv)
 
 	if(argc == 3 && strcmp(argv[1], "-p") == 0){
 		proxy(argv[2]);
-		exits(nil);
-	}
-	if(argc == 4 && strcmp(argv[1], "-n") == 0){
-		reconnect(atoi(argv[2]), atoi(argv[3]));
 		exits(nil);
 	}
 	if(argc == 3 && strcmp(argv[1], "-r") == 0){

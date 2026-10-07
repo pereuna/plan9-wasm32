@@ -146,6 +146,7 @@ inituser(void)
 	kcall(sysbind, "#p", "/proc", MREPL);
 	kcall(sysbind, "#d", "/fd", MREPL);
 	kcall(sysbind, "#I", "/net", MREPL);
+	kcall(sysbind, "#l0", "/net", MAFTER);	/* ether0 (etherwasm32.c), as 9front's bootrc */
 	kcall(sysbind, "#a", "/net", MAFTER);	/* tls (rcpu's tlsclient), as 9front's bootrc */
 	kcall(sysbind, "#i", "/dev", MAFTER);
 	kcall(sysbind, "#m", "/dev", MAFTER);
@@ -247,6 +248,35 @@ initproc(void*)
 	inituser();
 }
 
+/*
+ * a card's line in plan9.ini, as pc's: ether0=type=wasm32 ea=...
+ * (port/devether.c)
+ */
+int
+isaconfig(char *class, int ctlrno, ISAConf *isa)
+{
+	char cc[32], *p, *x;
+	int i;
+
+	snprint(cc, sizeof cc, "%s%d", class, ctlrno);
+	p = getconf(cc);
+	if(p == nil)
+		return 0;
+
+	x = nil;
+	kstrdup(&x, p);
+	p = x;
+
+	isa->type = "";
+	isa->nopt = tokenize(p, isa->opt, NISAOPT);
+	for(i = 0; i < isa->nopt; i++){
+		p = isa->opt[i];
+		if(cistrncmp(p, "type=", 5) == 0)
+			isa->type = p + 5;
+	}
+	return 1;
+}
+
 void
 main(uintptr pa)
 {
@@ -267,6 +297,7 @@ main(uintptr pa)
 	bootinfoclock();	/* the time: BootInfo's epoch */
 	procinit0();
 	screeninit();
+	links();
 	chandevreset();
 	mouseinput();
 	print("Plan9-wasm32: %lud pages free\n", conf.npage);

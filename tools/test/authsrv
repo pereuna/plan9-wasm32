@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
-"""A stand-in for the network the machine reaches through its origin (#I:
-WebSockets, each path a port: tools/serve's relay goes to PORT), for
-tests: a WebSocket server on 127.0.0.1:PORT whose /567 is a dp9ik auth
-server as 9front's auth/authsrv answers one (AuthPAK, then AuthTreq with
-form1 tickets), for the users and passwords given.  Written apart from
-9front's C, from its mpc sources (libauthsrv/*.mp) and authsrv.c: the
-machine's factotum and this agree only if both are right.  And a relay
-for rcpu inside one machine, which cannot listen: /17999 waits, and the
-next /17019 (an rcpu client) is joined to it, bytes both ways
-(sys/src/9/wasm32/test/d4.c's server).  /17998 never answers; /9 takes
-the connection and never reads.  And /5356,
-a secstore server (9front's secstored, written apart from it: pak.c,
-SConn.c), its users' files in memory as the clients put them.  Any other
-path is refused.
-  tools/test/authsrv PORT USER=PASSWORD... [secstore:USER=PASSWORD...]
+"""The tests' auth server, on the machine's network (tools/gateway -n runs
+it in its namespace, on 10.0.2.2): on ADDR's port 567 (ticket) a dp9ik
+auth server as 9front's auth/authsrv answers one (AuthPAK, then AuthTreq
+with form1 tickets), for the users and passwords given.  Written apart
+from 9front's C, from its mpc sources (libauthsrv/*.mp) and authsrv.c:
+the machine's factotum and this agree only if both are right.  And on
+5356 a secstore server (9front's secstored, written apart from it:
+pak.c, SConn.c), its users' files in memory as the clients put them.
+  tools/test/authsrv ADDR USER=PASSWORD... [secstore:USER=PASSWORD...]
 """
 import asyncio, base64, hashlib, hmac, os, struct, sys
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
@@ -367,117 +361,33 @@ class Secstore:
 			else:
 				return err('unrecognized operation')
 
-async def ws(r, w, users):
-	"""A WebSocket server (RFC 6455), binary frames: /567 the auth server"""
-	try:
-		head = await r.readuntil(b'\r\n\r\n')
-	except (asyncio.IncompleteReadError, ConnectionError):
-		w.close()
-		return
-	lines = head.decode('latin1').split('\r\n')
-	path = lines[0].split()[1]
-	hdr = {l.split(':', 1)[0].strip().lower(): l.split(':', 1)[1].strip() for l in lines[1:] if ':' in l}
-	print(f'test-authsrv: {path}', flush=True)
-	if path == '/17998':	# never answers: a connect that must give up (devwsnet's 60 s)
-		await asyncio.sleep(3600)
-		w.close()
-		return
-	if path not in ('/567', '/5356', '/17019', '/17999', '/9'):
-		w.write(b'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n')
-		w.close()
-		return
-	acc = base64.b64encode(hashlib.sha1((hdr['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
-	w.write(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
-		f'Sec-WebSocket-Accept: {acc}\r\n\r\n').encode())
-	buf = bytearray()
-	async def frame():
-		b0, b1 = await r.readexactly(2)
-		n = b1 & 0x7f
-		if n == 126:
-			n = struct.unpack('>H', await r.readexactly(2))[0]
-		elif n == 127:
-			n = struct.unpack('>Q', await r.readexactly(8))[0]
-		mask = await r.readexactly(4) if b1 & 0x80 else b'\0'*4
-		data = bytes(c ^ mask[i % 4] for i, c in enumerate(await r.readexactly(n)))
-		return b0 & 0x0f, data
+async def serve(r, w, users, which):
+	"""a connection to ticket (567) or secstore (5356), as 9front's listen gives one to its service"""
+	print(f'test-authsrv: {which}', flush=True)
 	async def read(n):
-		while len(buf) < n:
-			op, data = await frame()
-			if op == 8:
-				raise EOFError
-			if op in (0, 1, 2):
-				buf.extend(data)
-		out = bytes(buf[:n])
-		del buf[:n]
-		return out
-	def write(data, op=0x82):
-		n = len(data)
-		h = bytes([op, n]) if n < 126 else bytes([op, 126]) + struct.pack('>H', n) if n < 65536 else bytes([op, 127]) + struct.pack('>Q', n)
-		w.write(h + data)
-	if path == '/9':	# a sink that never reads: the machine's writer must wait (devwsnet's Sendhigh)
-		await asyncio.sleep(3600)
-		w.close()
-		return
-	if path == '/17999':	# an rcpu server waits for a client
-		done = asyncio.Event()
-		await listeners.put((frame, write, w, done))
-		await done.wait()
-		w.close()
-		return
-	if path == '/17019':	# an rcpu client: joined to the server waiting
-		try:
-			pframe, pwrite, pw, pdone = await asyncio.wait_for(listeners.get(), 30)
-		except asyncio.TimeoutError:
-			w.close()
-			return
-		async def pump(src, dst, dw):
-			try:
-				while True:
-					op, data = await src()
-					if op == 8:
-						return
-					if op in (0, 1, 2) and data:
-						dst(data)
-						await dw.drain()
-			except (asyncio.IncompleteReadError, ConnectionError):
-				return
-		ts = [asyncio.create_task(pump(frame, pwrite, pw)), asyncio.create_task(pump(pframe, write, w))]
-		await asyncio.wait(ts, return_when=asyncio.FIRST_COMPLETED)
-		for t in ts:
-			t.cancel()
-		for x in (w, pw):
-			try:
-				x.write(b'\x88\x00')
-			except ConnectionError:
-				pass
-		pdone.set()
-		w.close()
-		return
+		return await r.readexactly(n)
+	def write(data):
+		w.write(data)
 	try:
-		if path == '/5356':
+		if which == 'secstore':
 			await secstore.run(read, write)
 		else:
 			await Authsrv(users).run(read, write)
+		await w.drain()
 	except (EOFError, asyncio.IncompleteReadError, ConnectionError, ValueError) as e:
 		if isinstance(e, ValueError):
 			print(f'test-authsrv: {e}', flush=True)
-	try:
-		w.write(b'\x88\x00')
-		await w.drain()
-	except ConnectionError:
-		pass
 	w.close()
 
 async def main():
-	global listeners
-	listeners = asyncio.Queue()
-	port = int(sys.argv[1])
 	global secstore
+	addr = sys.argv[1]
 	users = dict(a.split('=', 1) for a in sys.argv[2:] if not a.startswith('secstore:'))
 	secstore = Secstore(dict(a[9:].split('=', 1) for a in sys.argv[2:] if a.startswith('secstore:')))
-	srv = await asyncio.start_server(lambda r, w: ws(r, w, users), '127.0.0.1', port)
-	async with srv:
-		await srv.serve_forever()
+	a = await asyncio.start_server(lambda r, w: serve(r, w, users, 'ticket'), addr, 567)
+	s = await asyncio.start_server(lambda r, w: serve(r, w, users, 'secstore'), addr, 5356)
+	async with a, s:
+		await asyncio.gather(a.serve_forever(), s.serve_forever())
 
 if __name__ == '__main__':
 	asyncio.run(main())

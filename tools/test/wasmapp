@@ -15,7 +15,8 @@ build/test/site) with init's arguments, until the machine halts
   ARGS='["/bin/rc", ...]'                  init's argv (?arg=); PAGEARGS='&x=1' more of the URL
   THEN='["arg", ...]'                      once it halts, the page again in the same
                                            browser (its OPFS) with these args;
-                                           EXPECT is the second load's
+                                           EXPECT is the second load's (the
+                                           first's in NAME-first.txt)
   WEBAUTHN='["go", "cancel", ...]'         a virtual authenticator (the DevTools
                                            protocol's, with PRF) for the page's
                                            passkeys (#ω, devwebauthn.c), and its
@@ -324,6 +325,10 @@ def main():
 			if os.environ.get('THEN'):
 				halt = [l for l in cdp.log if l.startswith('KERNEL-HALT')]
 				open(os.path.join(out, f'{name}-first.log'), 'w').write('\n'.join(cdp.log) + '\n')
+				try:
+					open(os.path.join(out, f'{name}-first.txt'), 'wb').write(base64.b64decode(cdp.js('window.plan9 ? window.plan9.eia0b64() : ""') or ''))
+				except RuntimeError:
+					pass
 				if not halt or 'platform:' in halt[0]:
 					raise SystemExit(f'FAIL: {name}: the first load: {halt or "did not halt"} (build/test/{name}-first.log)')
 				cdp.log.clear()

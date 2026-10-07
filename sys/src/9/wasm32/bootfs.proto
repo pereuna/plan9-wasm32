@@ -1,7 +1,8 @@
 # the wasm32 machine's boot file system (#R: the page gives it with the
 # kernel, as 9front's kernel has its bootfs.paq): what init, /boot/disk and
 # /boot/secstore run - the file servers a root can be (9660srv, hjfs,
-# gefs, cwfs64x, dossrv) and fstype - rc, rio and glenda's terminal (her profile's
+# gefs, cwfs64x, dossrv) and fstype - the network's ip/ipconfig and ndb/cs
+# with /lib/ndb - rc, rio and glenda's terminal (her profile's
 # webcookies and webfs, riostart's stats; rcpu).  rc's rcmain is its source's:
 # the release's /rc/lib/rcmain is older than its rc.  disk/mkfs's form:
 # name, mode, owner, group, and the file it is (from the tree's root; -
@@ -61,6 +62,10 @@ bin	- sys sys /wasm32/bin
 	webcookies
 	webfs
 	xd
+	ip
+		ipconfig
+	ndb
+		cs
 	auth
 		aescbc
 		factotum
@@ -75,6 +80,10 @@ bin	- sys sys /wasm32/bin
 		mkfs
 		prep
 lib
+	ndb
+		local
+		common
+		dnsroot
 	font
 		bit
 			vga

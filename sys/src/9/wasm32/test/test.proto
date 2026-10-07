@@ -1,6 +1,6 @@
 # the tests' boot file system: bootfs.proto's and these (tools/test/run;
-# tools/bootfs takes both): the test programs as mk makes them here, and
-# 9front's clock
+# tools/bootfs takes both): the test programs as mk makes them here,
+# 9front's clock and ip/ping, and the tests' /lib/ndb/local
 bin
 	c3a	- sys sys /sys/src/9/wasm32/test/3.c3a
 	c3b	- sys sys /sys/src/9/wasm32/test/3.c3b
@@ -19,4 +19,9 @@ bin
 	bytes	- sys sys /sys/src/9/wasm32/test/3.bytes
 	preempt	- sys sys /sys/src/9/wasm32/test/3.preempt
 	clock	- sys sys /wasm32/bin/clock
+	ip
+		ping	- sys sys /wasm32/bin/ip/ping
 	rcif.rc	- sys sys /sys/src/9/wasm32/test/rcif.rc
+lib
+	ndb
+		local	- sys sys /sys/src/9/wasm32/test/ndb.local

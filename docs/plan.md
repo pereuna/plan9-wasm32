@@ -32,8 +32,9 @@ own; "9front" here means that project.  It is installed and booted as
 ## The tree
 
 - sys/src/9/wasm32: the kernel and its platform (platform.js, the page),
-  devices: #S the disk (OPFS, partitions as sd's), #R the boot root, #I
-  the network over WebSockets to the origin, #ω WebAuthn.
+  devices: #S the disk (OPFS, partitions as sd's), #R the boot root, #l
+  an Ethernet card whose frames go over a WebSocket to the origin's
+  gateway (9front's devether and IP stack over it), #ω WebAuthn.
 - sys/src/9/port additions (BootInfo), sys/include/bootinfo.h.
 - sys/src/cmd/3a, 3c, 3l: the wasm32 assembler, compiler and loader.
 - libc, libthread, libmp, libsec for wasm32; /wasm32/include.
@@ -67,3 +68,11 @@ own; "9front" here means that project.  It is installed and booted as
    and the distribution's ISO (720 MB, read with range requests); it
    boots to rio over the Internet.  ?iso=file boots a copy of the ISO on
    one's own computer instead.
+7. The network as 9front's (done, 2026-10-07): #l0, an Ethernet card
+   (etherwasm32.c) in place of the WebSocket /net/tcp the import had; 9front's
+   devether and IP stack (#I) over it, and ipconfig, cs and the installer's
+   confignet as on a PC.  Its wire is a WebSocket to the origin's /ether;
+   tools/gateway is the other end - a switch and a TAP, a network of its
+   own with DHCP (-n) for offline and the tests, or the host's (-t).
+   https://plan2001.com/plan9-wasm32/ has no gateway yet: the card is there,
+   its link down.

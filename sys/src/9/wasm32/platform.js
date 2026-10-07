@@ -51,7 +51,9 @@ function firmware(front, disks = []) {
 	const regs = disks.map((d) => d ? (next += BI.pg) - BI.pg : 0);
 	const diskconf = disks.map((d, i) => d ? '*sdW' + i + '=0x' + regs[i].toString(16) + ' ' + d.size + (d.ro ? ' ro' : '') + '\n' : '').join('');
 	/* the firmware's own device lines last: plan9.ini's later line wins (bootargs.c), and these are not the page's to change */
-	const config = new TextEncoder().encode(initconf(front.args) + (front.config ?? '') + diskconf + '\0');
+	/* the Ethernet card first: plan9.ini's own ether0= wins */
+	const etherconf = front.ea ? 'ether0=type=wasm32 ea=' + front.ea + '\n' : '';
+	const config = new TextEncoder().encode(initconf(front.args) + etherconf + (front.config ?? '') + diskconf + '\0');
 	const rd = front.fs ?? null;
 	const sc = front.screen ?? { w: 1024, h: 768 };
 	const fbw = sc.w | 0, fbh = sc.h | 0;
@@ -633,12 +635,11 @@ function imports(env) {
 			env.post({ cursor: { x: iarg(0), y: iarg(1), clr: k.slice(arg(2), arg(2) + 32), set: k.slice(arg(3), arg(3) + 32) } });
 		},
 		platmousering: () => env.post({ mring: arg(0) }),
-		platnetopen: () => env.post({ netopen: { id: iarg(0), gen: arg(1), path: str(arg(2)), ring: arg(3), st: arg(4) } }),
-		platnetsend: () => {
-			const b = new Uint8Array(env.mem.buffer).slice(arg(2), arg(2) + iarg(3));
-			env.post({ netsend: { id: iarg(0), gen: arg(1), b } }, [b.buffer]);
+		platether: () => env.post({ ether: arg(0) }),
+		platethersend: () => {
+			const b = new Uint8Array(env.mem.buffer).slice(arg(0), arg(0) + iarg(1));
+			env.post({ ethersend: b }, [b.buffer]);
 		},
-		platnetclose: () => env.post({ netclose: { id: iarg(0), gen: arg(1) } }),
 		platkbdring: () => env.post({ kring: arg(0) }),
 		platwebauthn: () => env.post({ webauthn: { gen: arg(0), req: arg(1) ? str(arg(1)) : null, buf: arg(2), n: iarg(3), word: arg(4) } }),
 	};
@@ -879,7 +880,7 @@ function diskloop(h, mem, regs) {
 //	#S/sdW1: the distribution),
 //	config (more plan9.ini lines), canvas, screen ({ w, h }, 1024x768 without: the framebuffer, shown on
 //	the canvas; its pointer the mouse) - what the firmware puts in BootInfo (firmware()),
-//	ws (the machine's webterm: ws://host:port, the network's WebSockets),
+//	ws (the machine's gateway: ws://host:port, its Ethernet's WebSocket is ws + /ether), ea (the Ethernet card's address: 12 hex digits),
 //	failfork, failhelper, failrfmem (a test's: the nth fork's child, helper, rfork(RFMEM) child gets no Worker) }
 /*
  * The firmware's boot from the disk (as UEFI boots from an esp): the OPFS
@@ -996,7 +997,26 @@ async function fatfiles(f, rd, start) {
 	return { names: [...files.keys()], get: async (n) => { const x = files.get(n.toLowerCase()); return x ? chain(x.clus, x.len) : null; } };
 }
 
+/*
+ * the Ethernet card's address: this browser's, kept for the origin (the
+ * installed system's /lib/ndb/local knows it), else a new one, locally
+ * administered
+ */
+function etheraddr() {
+	const k = 'plan9-wasm32 ether0';
+	try {
+		const ea = localStorage.getItem(k);
+		if (/^[0-9a-f]{12}$/.test(ea ?? '')) return ea;
+	} catch (e) {}
+	const b = crypto.getRandomValues(new Uint8Array(6));
+	b[0] = (b[0] & 0xfe) | 2;
+	const ea = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+	try { localStorage.setItem(k, ea); } catch (e) {}
+	return ea;
+}
+
 export async function boot(url, front = {}) {
+	front = { ...front, ea: front.ea ?? etheraddr() };
 	/* the kernel: a URL, or its bytes (the disk's: diskboot) */
 	const module = typeof url === 'string' ? await WebAssembly.compileStreaming(fetch(url)) : await WebAssembly.compile(url);
 	/*
@@ -1174,12 +1194,6 @@ export async function boot(url, front = {}) {
 	}
 
 	/*
-	 * the network (devwsnet.c): conversation n a WebSocket to front.ws +
-	 * path (the machine's webterm); what it brings into the kernel's ring
-	 * (r, w, closed, b[64K]), the kernel woken; past a full ring the
-	 * connection fails rather than lose bytes, as drawterm's wsock.c
-	 */
-	/*
 	 * WebAuthn (devwebauthn.c, docs/webauthn.md): the machine's request
 	 * shows a button - the browser wants a gesture for a passkey - and its
 	 * click asks navigator.credentials, with the PRF extension; the answer
@@ -1261,127 +1275,54 @@ export async function boot(url, front = {}) {
 			},
 		};
 	})();
-	const net = { ws: new Map() };	/* n -> its conversation: { gen, ws, opened } */
-	const NRING = 64*1024;		/* a power of 2: the counters run on modulo 2^32, the index masked */
 	/*
-	 * What comes faster than the kernel reads waits in the conversation's
-	 * queue and goes into its ring as the kernel makes room; past QMAX the
-	 * other end is not keeping to any flow control and the connection
-	 * fails.  The other way the kernel reserves: it adds a piece to sendq
-	 * in the ring before it sends it and waits past Sendhigh (devwsnet.c);
-	 * the page takes off what has left the WebSocket's bufferedAmount.
+	 * the Ethernet card (etherwasm32.c): its frames over a WebSocket to
+	 * front.ws + /ether, the machine's gateway, a frame a message each way.
+	 * What comes in goes into the kernel's ring - r, w, link, drops, then
+	 * the frames, each its length (2 bytes, little-endian) and its bytes -
+	 * or, past a full ring, is dropped and counted, as a card's would be;
+	 * what goes out is dropped while the WebSocket is not open or holds
+	 * more than ETHERQ.  link is 1 while it is open; closed, it is opened
+	 * again, a second later, then longer each time up to a minute
 	 */
-	const QMAX = 1024*1024;
-	net.open = ({ id, gen, path, ring, st }) => {
-		net.close({ id });	/* an older gen's, if its close has not come yet */
-		const i32 = new Int32Array(mem.buffer);
-		const word = (a, v) => { Atomics.store(i32, a >> 2, v); Atomics.notify(i32, a >> 2); };
-		/* the ring empty: only this thread writes it, and the kernel reads it only once this gen is open
-		   (front.ringstart, a test's: the counters start there - across 2^31 and 2^32) */
-		Atomics.store(i32, ring >> 2, (front.ringstart ?? 0) | 0);
-		Atomics.store(i32, (ring + 4) >> 2, (front.ringstart ?? 0) | 0);
-		Atomics.store(i32, (ring + 8) >> 2, 0);
-		Atomics.store(i32, (ring + 12) >> 2, 0);
-		const c = { gen, ws: null, opened: false, q: [], qlen: 0, pump: 0 };
-		c.ring = ring;
-		net.ws.set(id, c);
-		const mine = () => net.ws.get(id) === c;
-		const end = (why) => {
-			if (!mine()) return;
-			net.ws.delete(id);
-			if (!c.opened) word(st, -1);
-			else { Atomics.store(i32, (ring + 8) >> 2, why); Atomics.notify(i32, (ring + 4) >> 2); }
-		};
-		/* the queue into the kernel's ring, as much as it has room for; again soon while some is left */
-		const deliver = () => {
-			c.pump = 0;
-			if (!mine()) return;
-			const u8 = new Uint8Array(mem.buffer);
-			let w = Atomics.load(i32, (ring + 4) >> 2) >>> 0;
-			let room = NRING - ((w - (Atomics.load(i32, ring >> 2) >>> 0)) >>> 0), n = 0;
-			while (c.q.length && room > 0) {
-				const b = c.q[0], k = Math.min(b.length, room);
-				for (let i = 0; i < k; i++) u8[ring + 16 + (w++ & (NRING - 1))] = b[i];
-				room -= k;
-				n += k;
-				if (k === b.length) c.q.shift(); else c.q[0] = b.subarray(k);
-			}
-			if (n) {
-				c.qlen -= n;
-				Atomics.store(i32, (ring + 4) >> 2, w | 0);
-				Atomics.notify(i32, (ring + 4) >> 2);
-			}
-			if (c.q.length) c.pump = setTimeout(deliver, 5);
-		};
-		const put = (b) => {
-			if (c.qlen + b.length > QMAX) {
-				end(3);
-				c.ws?.close();
-				return;
-			}
-			c.q.push(b);
-			c.qlen += b.length;
-			if (!c.pump) deliver();
-		};
+	const NERING = 256*1024, ETHERQ = 1024*1024;	/* a power of 2: the counters run modulo 2^32, the index masked */
+	const ether = { ring: 0, ws: null, wait: 1000 };
+	ether.word = (o, v) => { const i32 = new Int32Array(mem.buffer); Atomics.store(i32, (ether.ring + o) >> 2, v); Atomics.notify(i32, (ether.ring + 4) >> 2); };
+	ether.put = (f) => {
+		const i32 = new Int32Array(mem.buffer), u8 = new Uint8Array(mem.buffer), R = ether.ring;
+		let w = Atomics.load(i32, (R + 4) >> 2) >>> 0;
+		const room = NERING - ((w - (Atomics.load(i32, R >> 2) >>> 0)) >>> 0);
+		if (f.length > 0xffff || 2 + f.length > room) { Atomics.add(i32, (R + 12) >> 2, 1); return; }
+		u8[R + 16 + (w++ & (NERING - 1))] = f.length & 0xff;
+		u8[R + 16 + (w++ & (NERING - 1))] = f.length >> 8;
+		for (let i = 0; i < f.length; i++) u8[R + 16 + (w++ & (NERING - 1))] = f[i];
+		Atomics.store(i32, (R + 4) >> 2, w | 0);
+		Atomics.notify(i32, (R + 4) >> 2);
+	};
+	ether.connect = () => {
+		if (!front.ws || /\/\/0\.0\.0\.0:0$/.test(front.ws)) return;	/* no gateway: the link stays down */
 		let ws;
 		try {
-			ws = new WebSocket((front.ws ?? '') + path);
+			ws = new WebSocket(front.ws + '/ether');
 		} catch (e) {
-			end(2);
 			return;
 		}
 		ws.binaryType = 'arraybuffer';
-		c.ws = ws;
-		ws.onopen = () => {
-			if (!mine()) return;
-			if (!c.opened) { c.opened = true; word(st, 1); }
+		ether.ws = ws;
+		ws.onopen = () => { ether.wait = 1000; ether.word(8, 1); };
+		ws.onclose = () => {
+			if (ether.ws !== ws) return;
+			ether.ws = null;
+			ether.word(8, 0);
+			setTimeout(ether.connect, ether.wait);
+			ether.wait = Math.min(ether.wait * 2, 60000);
 		};
-		ws.onclose = ws.onerror = () => end(1);
-		ws.onmessage = (e) => {
-			if (!mine()) return;
-			put(typeof e.data === 'string' ? new TextEncoder().encode(e.data) : new Uint8Array(e.data));
-		};
+		ws.onmessage = (e) => { if (typeof e.data !== 'string') ether.put(new Uint8Array(e.data)); };
 	};
-	/* k bytes of the kernel's the page no longer holds for c: off its reservation (never below 0), its writer woken */
-	net.release = (c, k) => {
-		if (k <= 0) return;
-		const i32 = new Int32Array(mem.buffer), a = (c.ring + 12) >> 2;
-		let v;
-		do v = Atomics.load(i32, a);
-		while (Atomics.compareExchange(i32, a, v, Math.max(0, v - k)) !== v);
-		Atomics.notify(i32, a);
-	};
-	/* a test's: the most the kernel has had reserved in the page, as the page sees it */
-	const seen = (c) => { net.sendqmax = Math.max(net.sendqmax ?? 0, Atomics.load(new Int32Array(mem.buffer), (c.ring + 12) >> 2)); };
-	/* what has left the WebSocket's buffer is let go, looked at again until all has */
-	const rawq = (c) => {
-		c.rawt = 0;
-		if (net.ws.get(c.id) !== c) return;
-		const out = c.posted - (c.ws?.bufferedAmount ?? 0);
-		net.release(c, out - c.released);
-		c.released = out;
-		if (c.posted > c.released) c.rawt = setTimeout(() => rawq(c), 20);
-	};
-	net.send = ({ id, gen, b }) => {
-		const c = net.ws.get(id);
-		if (!c || c.gen !== gen) return;
-		seen(c);
-		if (c.ws?.readyState === 1) {
-			c.ws.send(b);
-			c.id = id;
-			c.posted = (c.posted ?? 0) + b.length;
-			c.released ??= 0;
-			if (!c.rawt) rawq(c);
-		} else
-			net.release(c, b.length);	/* nowhere to go: not held */
-	};
-	net.close = ({ id, gen }) => {	/* gen undefined: whichever */
-		const c = net.ws.get(id);
-		if (!c || gen !== undefined && c.gen !== gen) return;
-		net.ws.delete(id);
-		if (!c.ws) return;
-		c.ws.onopen = c.ws.onclose = c.ws.onerror = c.ws.onmessage = null;
-		c.ws.close();
+	ether.start = (ring) => { ether.ring = ring; ether.connect(); };
+	ether.send = (b) => {
+		const ws = ether.ws;
+		if (ws?.readyState === 1 && ws.bufferedAmount < ETHERQ) ws.send(b);
 	};
 
 	/* a test's: the nth Worker of a kind is not made - a fork's child, a helper, an rfork(RFMEM) child's (platform.h) */
@@ -1407,9 +1348,8 @@ export async function boot(url, front = {}) {
 			if (m.flush) screen.flush(m.flush);
 			if (m.cursor) screen.cursor(m.cursor);
 			if (m.mring !== undefined) screen.mring = m.mring;
-			if (m.netopen) net.open(m.netopen);
-			if (m.netsend) net.send(m.netsend);
-			if (m.netclose) net.close(m.netclose);
+			if (m.ether !== undefined) ether.start(m.ether);
+			if (m.ethersend) ether.send(m.ethersend);
 			if (m.kring !== undefined) kring = m.kring;
 			if (m.webauthn) passkey.request(m.webauthn);
 			if (m.halt !== undefined) { console.log('KERNEL-HALT ' + m.halt); front.halt?.(m.halt); }
@@ -1419,7 +1359,6 @@ export async function boot(url, front = {}) {
 	};
 	window.plan9 = {
 		get flushes() { return screen.flushes; },
-		get sendqmax() { return net.sendqmax ?? 0; },
 		eia0bytes: () => { const b = new Uint8Array(eia.reduce((n, c) => n + c.length, 0)); let o = 0; for (const c of eia) { b.set(c, o); o += c.length; } return b; },
 		eia0out: () => new TextDecoder().decode(window.plan9.eia0bytes()),
 		eia0b64: () => { let s = ''; for (const c of window.plan9.eia0bytes()) s += String.fromCharCode(c); return btoa(s); },

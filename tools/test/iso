@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The tests' distribution: a small ISO made from the distribution's root
 (tools/dist: build/dist/root) - what the live system, 9front's init and
-termrc, and the installer (inst/start) run, and the boot materials - so that
+termrc, and the installer (inst/start: ipconfig, ndbsetup's ssam) run, and the boot materials - so that
 an install (tools/test/run's install) copies minutes' worth, not the whole
 release.  Its live image in build/test/dist: the page, the kernel, its boot
 file system, plan9.ini (cdboot=yes, iso=dist.iso) and the ISO.
@@ -21,11 +21,11 @@ FILES = ['lib/namespace', 'lib/namespace.ftp', 'lib/namespace.httpd', 'lib/keybo
 DIRS = ['dist/9front', 'tmp', 'mnt', 'n', 'usr/glenda/tmp']
 # the programs: the boot file system's, and what the live system, termrc and inst/start run
 PROGS = '''
-	9660srv auth/aescbc auth/factotum auth/secstore aux/kbdfs aux/timesync aux/mouse
+	9660srv auth/aescbc auth/factotum auth/secstore aux/getflags aux/kbdfs aux/timesync aux/mouse
 	awk basename bind cat chgrp chmod cleanname cp cwfs64x date dd disk/edisk disk/fdisk
 	disk/format disk/mbr disk/mkext disk/mkfs disk/prep dossrv echo exportfs gefs grep
 	gunzip hjfs ip/ipconfig ls mkdir mntgen mount mv ndb/cs ndb/dns ndb/query ns plumb
-	plumber ps pwd ramfs rc read rio rm sed sleep sort srv stats tail tar test tlsclient
+	plumber ps pwd ramfs rc read rio rm sam sed sleep sort srv stats tail tar test tlsclient
 	touch tr uniq unmount wc webcookies webfs xd
 '''.split()
 

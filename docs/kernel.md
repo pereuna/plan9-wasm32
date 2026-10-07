@@ -31,24 +31,33 @@ page boots it as firmware boots a PC's kernel (`docs/boot.md`).
 
 `devtab.c` is the configuration (no config file, no mkdevc).  9front's
 devices from `port/` - root, cons, env, pipe, dup, srv, mnt, uart, proc,
-draw, mouse, tls - and the platform's own:
+draw, mouse, tls, ether (`#l`) - and its IP stack from `ip/` (`#I`, the
+protocols and media pc's config has), and the platform's own:
 
 | | | |
 |---|---|---|
 | `#R` | `devrootfs.c` | the boot file system, read-only, from BootInfo's `rdbase`/`rdlen` (`tools/bootfs`) |
 | `#S` | `devsdw.c` | the disks: `sdW0`, a file in the origin's private file system (OPFS), a Worker's sync handle; `sdW1`, read-only, the distribution's ISO (the server's, by HTTP range requests, or a local file); GPT and prep partitions as sd's (`part`, `delpart`); `sdctl` |
-| `#I` | `devwsnet.c` | the network: `/net/tcp` and `/net/cs` over WebSockets to the page's origin, a path per port (`/567` auth, `/17019` rcpu ...) |
+| `#l0` | `etherwasm32.c` | the Ethernet card, `ether0`, under 9front's devether: its frames over a WebSocket to the machine's gateway |
 | `#b` | `devkbd.c` | the keyboard: the browser's key events as runes for kbdfs |
 | `#t` | `uartwasm32.c` | the serial port `eia0`: the page's console |
 | `#ω` | `devwebauthn.c` | WebAuthn (`docs/webauthn.md`) |
 | `#¶` | `devswap.c` | `swap`: the memory, as 9front's devswap says it (no paging, no swap) |
 | screen | `screen.c` | XRGB32 in the kernel's memory, drawn by the page on its canvas (`platflush`) |
 
-The network's WebSockets are the page's (a Worker waiting in
-`Atomics.wait` would not hear them): what comes in the page writes into
-the conversation's ring in kernel memory; what goes out is reserved in
-the ring first, and the writer waits past `Sendhigh`, so a fast writer
-cannot fill the page.
+The network is 9front's own: ipconfig, DHCP, ARP, TCP, UDP, cs and dns
+over an Ethernet card, as on a virtual machine.  The card's wire is a
+WebSocket of the page's to its origin, `/ether` (a Worker waiting in
+`Atomics.wait` would not hear it), a frame a binary message each way;
+plan9.ini's `ether0=type=wasm32 ea=...` is the firmware's, the address
+the same each time in one browser (localStorage).  What comes in the page
+writes into the card's ring in kernel memory, and a kproc gives it to
+devether; past a full ring a frame is dropped, as a card's would be.
+What goes out goes to the page a frame at a time, and is dropped while
+the WebSocket is not open or is full.  The link is up while it is open.
+The other end is the machine's gateway (`tools/gateway`): a switch, the
+machines on it and a TAP device its ports - a network of its own with
+DHCP (`-n`, no root needed) or the host's (`-t`).
 
 ## Boot
 

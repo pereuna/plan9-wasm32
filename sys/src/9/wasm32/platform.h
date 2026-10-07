@@ -42,10 +42,9 @@ void	platnoted(void);		/* noted(NCONT): back out of the handler */
 void	platflush(int, int, int, int);	/* this rectangle of it changed */
 void	platcursor(int, int, uchar*, uchar*);	/* the cursor: its offset, clr and set (16x16, 2 bytes a line) */
 void	platkbdring(void*);			/* the page's keyboard messages into the ring: r, w, b[4096] (devkbd.c) */
-void	platmousering(void*);
-/* the network (devwsnet.c): WebSockets to the machine's webterm, the page's */
-void	platnetopen(int, ulong, char*, void*, long*);	/* conversation n, its gen: the path (/17019), its ring (r, w, closed, b[64K]; the page empties it), its word (1 open, -1 not) */
-void	platnetsend(int, ulong, void*, long);	/* bytes out, if (n, gen) is still the page's */
-void	platnetclose(int, ulong);		/* hang up (n, gen) */		/* the page's mouse events into the ring: w, r, ev[64][4] (x, y, buttons, msec) */
+void	platmousering(void*);			/* the page's mouse events into the ring: w, r, ev[64][4] (x, y, buttons, msec) */
+/* the Ethernet card (etherwasm32.c): its frames over the page's WebSocket to the machine's gateway */
+void	platether(void*);			/* frames in into the ring: r, w, link, drops, b[256K] (each its length, 2 bytes, and its bytes) */
+void	platethersend(void*, long);		/* a frame out */
 /* WebAuthn (devwebauthn.c): request gen to the page, which shows a button; its answer into buf (at most n), then its length in the word (-1 none); a nil request takes the page's button away */
 void	platwebauthn(ulong, char*, char*, long, long*);

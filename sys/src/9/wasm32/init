@@ -11,9 +11,10 @@
 # system, and 9front's own init from it (/$cputype/init -t: /lib/namespace,
 # termrc, the user's profile: rio; or init's own arguments, a command).
 #
-# No root: the boot file system alone, a terminal - glenda's home on the
-# machine's disk (/boot/disk), the keys from secstore if there is one, her
-# profile (rio -i riostart); rc goes on on the console when rio is done.
+# No root: the boot file system alone, a terminal - the network (DHCP on
+# ether0, cs), glenda's home on the machine's disk (/boot/disk), the keys
+# from secstore if there is one, her profile (rio -i riostart); rc goes
+# on on the console when rio is done.
 cat /adm/timezone/local >/env/timezone
 mntgen -s slashn /n
 mntgen -s slashmnt /mnt
@@ -77,6 +78,11 @@ case local!*
 }
 rm -f '/env/fn#root'
 
+# the network, as termrc's for a machine its ndb knows: DHCP on the card (etherwasm32.c)
+# if its gateway is there, the link up; and cs
+if(test -e /net/ether0 && ~ `{sed -n 's/^link: //p' /net/ether0/stats} 1)
+	ip/ipconfig ether /net/ether0 >[2]/dev/null
+ndb/cs
 rc /boot/disk	# glenda's home on the machine's disk, if there is one
 # factotum's keys from secstore, if there is one (as 9front's bootrc on a terminal)
 rc /boot/secstore
