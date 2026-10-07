@@ -1,0 +1,9 @@
+ticks in it: ok
+create: ok, prf enabled
+get: the same id, 32-byte prf, user glenda
+again: the same prf
+other salt: another prf
+discoverable: user glenda, the same prf
+cancel: error cancelled
+other rp: error rp example.com is not this page's
+bad request: write error: bad process or channel control request

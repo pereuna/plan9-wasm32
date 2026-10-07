@@ -1,0 +1,6 @@
+Plan9-wasm32 kernel: 9front's port/
+written to #c/cons
+#e/sysname: wasm32
+caught: file does not exist: '#c/nonexistent'
+tsleep 100 ms: ok
+ticks in it: ok

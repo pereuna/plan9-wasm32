@@ -1,0 +1,8 @@
+ticks in it: ok
+/net/ether0
+/net/tcp
+an address from DHCP
+auth=10.0.2.2
+the gateway answers
+/net/cs
+done

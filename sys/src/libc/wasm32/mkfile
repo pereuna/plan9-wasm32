@@ -1,0 +1,18 @@
+objtype=wasm32
+</$objtype/mkfile
+
+# what 386 has in assembler, wasm32 has in C: 3l's atomics (_tas, cas,
+# casp), the platform's contexts for libthread, and main
+LIB=/$objtype/lib/libc.a
+CFILES=\
+	atomic.c\
+	ctx.c\
+	getfcr.c\
+	main9.c\
+	notejmp.c\
+
+HFILES=/sys/include/libc.h
+
+OFILES=${CFILES:%.c=%.$O}
+
+</sys/src/cmd/mksyslib

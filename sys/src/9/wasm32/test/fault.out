@@ -1,0 +1,4 @@
+ticks in it: ok
+status fault N: sys: trap: table index is out of bounds
+no fault
+the machine goes on

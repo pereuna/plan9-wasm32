@@ -1,0 +1,14 @@
+</$objtype/mkfile
+
+LIB=/$objtype/lib/libaml.a
+OFILES=\
+	aml.$O\
+	amlmapio.$O\
+	amlunmapio.$O\
+	amlalloc.$O\
+	amldelay.$O\
+	amltime.$O\
+
+HFILES=/sys/include/aml.h
+
+</sys/src/cmd/mksyslib

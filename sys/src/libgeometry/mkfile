@@ -1,0 +1,16 @@
+</$objtype/mkfile
+
+LIB=/$objtype/lib/libgeometry.a
+
+OFILES=\
+	point.$O\
+	matrix.$O\
+	quaternion.$O\
+	rframe.$O\
+	utils.$O\
+	fmt.$O\
+
+HFILES=\
+	/sys/include/geometry.h
+
+</sys/src/cmd/mksyslib

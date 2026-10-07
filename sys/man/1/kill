@@ -1,0 +1,99 @@
+.TH KILL 1
+.SH NAME
+kill, Kill, slay, broke, dontkill \- print commands to kill processes
+.SH SYNOPSIS
+.B Kill
+.I name ...
+.PP
+.B kill
+.I name ...
+.PP
+.B slay
+.I name ...
+.PP
+.B broke
+[
+.I user
+]
+.PP
+.B dontkill
+.I regexp
+.SH DESCRIPTION
+.I Kill
+and
+.I kill
+print commands that will cause all processes called
+.I name
+to be terminated;
+the latter restricts the action
+to processes owned by the current user.
+Use the
+.B send
+command of
+.IR rio (1),
+or pipe the output of
+.I kill
+or
+.I Kill
+into
+.IR rc (1)
+to execute the commands.
+.PP
+.I Kill
+suggests sending a
+.B "kill"
+note to the process; the same
+message delivered to the process's
+.B ctl
+file (see
+.IR proc (3))
+is a surer, if heavy handed, kill,
+but is necessary if the offending process is
+ignoring notes.
+The
+.I slay
+command prints commands to do this.
+.PP
+.I Broke
+prints commands that will cause all processes
+in the
+.I Broken
+state
+and owned by
+.I user
+(by default, the current user)
+to go away.
+When a process dies because of an error caught by
+the system, it may linger in the
+.I Broken
+state to allow examination with a debugger.
+Executing the commands printed by
+.I broke
+lets the system reclaim the resources used by
+the broken processes.
+.PP
+.I Dontkill
+flags processes matching the program name
+.I regexp
+as not to be killed in the event of memory
+exhaustion. This is usually run from
+.B termrc
+and
+.B cpurc
+(see
+.IR cpurc (8))
+to protect important system processes from
+getting killed.
+.SH SOURCE
+.B /rc/bin/Kill
+.br
+.B /rc/bin/kill
+.br
+.B /rc/bin/broke
+.br
+.B /rc/bin/dontkill
+.SH "SEE ALSO"
+.IR ps (1),
+.IR stop (1),
+.IR notify (2),
+.IR proc (3)

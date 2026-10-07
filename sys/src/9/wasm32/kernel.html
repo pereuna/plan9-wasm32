@@ -1,0 +1,246 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan9-wasm32</title>
+<meta name="plan9-version" content="@VERSION@">
+<style>
+	:root { --bg: #fff; --fg: #000; }
+	@media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #ddd; } }
+	html, body { margin: 0; height: 100%; overflow: hidden; background: #777; }
+	body { color: var(--fg); font: 14px monospace; }
+	/* the machine's screen is the window (rio in all of it); ?console=1 the serial port below it */
+	canvas { display: block; width: 100vw; height: calc(100vh - var(--barh, 0px)); background: #777; touch-action: none; outline: none; }
+	pre { display: none; margin: 0; padding: 16px; white-space: pre-wrap; word-break: break-all; background: var(--bg); }
+	body.console { overflow: auto; }
+	body.console canvas { width: auto; height: auto; max-width: 100%; margin: 0 auto; }
+	body.console pre { display: block; }
+	/* a touch screen's key bar (body.touch): the keys a phone's keyboard lacks, and the mouse's buttons */
+	#bar { display: none; position: fixed; left: 0; right: 0; bottom: 0; height: 44px; background: #333; gap: 3px; padding: 4px 3px; box-sizing: border-box; overflow-x: auto; }
+	body.touch #bar { display: flex; }
+	body.touch { --barh: 44px; }
+	#bar button { flex: 1 0 auto; min-width: 28px; padding: 0 4px; font: 14px monospace; color: #fff; background: #555; border: 0; border-radius: 4px; touch-action: manipulation; }
+	#bar button.on { background: #2a7; }
+	/* a phone's keyboard: it opens for a text field, this one, off the screen (a touch focuses it) */
+	#kbd { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; }
+	#isopick { display: none; position: fixed; inset: 0; padding: 32px 16px; background: var(--bg); color: var(--fg); }
+	#isopick.on { display: block; }
+	#halt { display: none; position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 16px; background: var(--bg); }
+</style>
+</head>
+<body>
+<!-- Plan9-wasm32's machine (sys/src/9/wasm32): its screen the window (?screen=WxH another size), its serial port with ?console=1 -->
+<canvas id="screen" width="800" height="600"></canvas>
+<pre id="eia0"></pre>
+<pre id="halt"></pre>
+<div id="isopick"><p>Choose the distribution's ISO image (plan9-wasm32.iso): the machine reads it as its CD, sdW1, from this computer's disk.</p><input type="file" accept=".iso,application/x-iso9660-image"></div>
+<div id="bar"><button data-k="kbd">kbd</button><button data-b="1" class="on">m1</button><button data-b="2">m2</button><button data-b="4">m3</button><button data-k="Escape">esc</button><button data-k="Tab">tab</button><button data-k="ctrl">ctl</button><button data-k="Delete">del</button><button data-k="ArrowLeft">←</button><button data-k="ArrowUp">↑</button><button data-k="ArrowDown">↓</button><button data-k="ArrowRight">→</button></div>
+<textarea id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="keyboard"></textarea>
+<script type="module">
+import { boot, diskboot } from './platform.js';
+const pre = document.getElementById('eia0'), dec = new TextDecoder();
+/* the page's version (tools/build: the commit and its time), so that a cached page shows */
+const version = document.querySelector('meta[name=plan9-version]')?.content ?? '';
+if (version && !version.startsWith('@')) {
+	pre.textContent = 'Plan9-wasm32 page ' + version + '\n';
+	document.title += ' ' + version;
+}
+// init: ?arg=... what it runs, /boot/init (kbdfs and rc) without; ?noinit=1 none (C2a's test);
+// ?conf=name=value plan9.ini's lines (BootInfo's config, as init's init=)
+const q = new URLSearchParams(location.search);
+if ((q.get('console') === '1')) document.body.classList.add('console');
+const args = q.has('noinit') ? [] : q.getAll('arg').length ? q.getAll('arg') : ['/bin/rc', '/boot/init'];
+/*
+ * plan9.ini from the server, if it has one (as 9front's ISO has its own): its lines go into
+ * BootInfo's config with the firmware's - e.g. secstore= (/boot/secstore gets factotum's keys
+ * from it) or passkeyrp= (#ω's rp, docs/webauthn.md); cpu= is the page's host.  iso=FILE is
+ * the firmware's: that file of the server's is the read-only disk sdW1 (the live image's
+ * distribution, with cdboot=yes: /boot/init mounts it as the root)
+ */
+const ini = await fetch('plan9.ini', { cache: 'no-store' }).then((r) => r.ok ? r.text() : '').catch(() => '');
+const iniconf = (t) => t.replace(/\r/g, '').split('\n').filter((l) => /^[a-zA-Z*][^=]*=/.test(l) && !/^iso=/.test(l)).map((l) => l + '\n').join('');	/* iso=: the firmware's */
+/* the firmware's own lines: cpu= the page's host, bootfile= the kernel it boots (as 9front's 9boot says it) */
+const machine = 'cpu=' + location.hostname + '\nbootfile=9wasm32.wasm\n' + iniconf(ini);
+const inival = (t, k) => (t.replace(/\r/g, '').match(new RegExp('^' + k + '=(\\S+)', 'm')) ?? [])[1];
+/* a touch screen (a phone): the key bar, and the screen above it */
+const touch = matchMedia('(pointer: coarse)').matches;
+if (touch) document.body.classList.add('touch');
+const barh = touch ? 44 : 0;
+
+// the boot file system (tools/bootfs: devrootfs.c's archive), the kernel's companion as on the disk
+async function rootfs() {
+	const fs = await fetch('9wasm32.fs');
+	if (!fs.ok) throw new Error('9wasm32.fs: ' + fs.status);
+	return new Uint8Array(await fs.arrayBuffer());
+}
+
+// the keyboard: #b/kbd (devkbd.c) for kbdfs - each key down (r) and up (R)
+// as Plan 9's rune. Characters are the browser's (e.key: the system's
+// layout applied, äåö as they are), not scancodes: no kbmap
+const K = { Enter: '\n', Backspace: '\b', Tab: '\t', Escape: '\x1b', Delete: '\x7f',
+	Shift: '\uf016', Control: '\uf017', Alt: '\uf015', AltGraph: '\uf867', Meta: '\uf868',
+	ArrowUp: '\uf00e', ArrowDown: '\uf800', ArrowLeft: '\uf011', ArrowRight: '\uf012',
+	Home: '\uf00d', End: '\uf018', PageUp: '\uf00f', PageDown: '\uf013', Insert: '\uf014' };
+const down = new Map();	/* e.code: the rune its down sent, for its up */
+document.addEventListener('keydown', (e) => {
+	/* Meta itself is Plan 9's Kmod4; Meta with another key is the browser's (its shortcuts) */
+	if (!window.plan9 || e.metaKey && e.key !== 'Meta') return;
+	/* Ctrl-C with text selected (the console's) is the browser's copy */
+	if (e.ctrlKey && (e.key === 'c' || e.key === 'C' || e.key === 'Insert') && String(getSelection()).length) return;
+	/* Ctrl-V and Shift-Insert are the browser's paste: its paste event types the text (kernelpaste) */
+	if (e.ctrlKey && !e.altKey && (e.key === 'v' || e.key === 'V') || e.shiftKey && e.key === 'Insert') return;
+	const r = K[e.key] ?? ([...e.key].length === 1 ? e.key : undefined);
+	if (r === undefined) return;
+	down.set(e.code, r);
+	window.plan9.kbd('r' + r + '\0');
+	e.preventDefault();
+});
+document.addEventListener('keyup', (e) => {
+	if (!window.plan9) return;
+	const r = down.get(e.code);
+	if (r === undefined) return;
+	down.delete(e.code);
+	window.plan9.kbd('R' + r + '\0');
+	e.preventDefault();
+});
+window.addEventListener('blur', () => {	/* keys let go elsewhere */
+	for (const r of down.values()) window.plan9?.kbd('R' + r + '\0');
+	down.clear();
+});
+/*
+ * paste: each character as a key down and up - kbdfs's key path waits
+ * for its readers (its c path drops what it has no room for), and rio
+ * gets them as typed.  The modifiers let go first: Ctrl is down after
+ * Ctrl-V, and kbdfs would make the text control characters
+ */
+window.kernelpaste = (text) => {
+	if (!window.plan9) return;
+	for (const k of ['Shift', 'Control', 'Alt', 'AltGraph', 'Meta']) window.plan9.kbd('R' + K[k] + '\0');
+	for (const c of text.replace(/\r\n?/g, '\n')) window.plan9.kbd('r' + c + '\0R' + c + '\0');
+};
+/*
+ * a phone: its keyboard types into #kbd (its keydowns are 'Unidentified', or none): what goes in
+ * is typed as keys, Backspace and Return too, and the field kept empty.  A touch on the page
+ * focuses it (opens the keyboard), unless text is being selected
+ */
+const kbdfield = document.getElementById('kbd');
+const kbdreset = () => { kbdfield.value = ' '; kbdfield.setSelectionRange(1, 1); };	/* a space: Backspace has something to delete */
+kbdfield.addEventListener('input', (e) => {
+	if (window.plan9) {
+		if (e.inputType === 'deleteContentBackward') window.plan9.kbd('r' + K.Backspace + '\0R' + K.Backspace + '\0');
+		else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') window.plan9.kbd('r\n\0R\n\0');
+		else if (e.data && ctrl) {	/* the bar's Ctrl: the next key with it */
+			window.plan9.kbd('r' + K.Control + '\0');
+			for (const c of e.data) window.plan9.kbd('r' + c + '\0R' + c + '\0');
+			window.plan9.kbd('R' + K.Control + '\0');
+			ctrl = false;
+			bar.querySelector('[data-k=ctrl]').classList.remove('on');
+		}
+		else if (e.data) for (const c of e.data) window.plan9.kbd('r' + c + '\0R' + c + '\0');
+	}
+	kbdreset();
+});
+kbdfield.addEventListener('focus', kbdreset);
+/*
+ * the key bar: kbd the phone's keyboard (#kbd focused by the tap itself), m1 m2 m3 the button a
+ * finger is (for the next touch, then m1 again: rio's menus), keys as typed, ctl for the next key
+ */
+let ctrl = false, touchbutton = 1;
+const bar = document.getElementById('bar');
+const typekey = (r) => window.plan9?.kbd('r' + r + '\0R' + r + '\0');
+bar.addEventListener('pointerdown', (e) => e.preventDefault());	/* the keyboard stays open */
+bar.addEventListener('click', (e) => {
+	const b = e.target.closest('button');
+	if (!b) return;
+	if (b.dataset.k === 'kbd') kbdfield.focus();
+	else if (b.dataset.k === 'ctrl') b.classList.toggle('on', ctrl = !ctrl);
+	else if (b.dataset.k) typekey(K[b.dataset.k]);
+	else if (b.dataset.b) {
+		touchbutton = Number(b.dataset.b);
+		for (const x of bar.querySelectorAll('[data-b]')) x.classList.toggle('on', x === b);
+	}
+});
+const button1 = () => { touchbutton = 1; for (const x of bar.querySelectorAll('[data-b]')) x.classList.toggle('on', x.dataset.b === '1'); };
+document.addEventListener('pointerup', (e) => { if (e.pointerType === 'touch' && e.target.id === 'screen') button1(); });
+document.addEventListener('touchend', () => { if (!String(getSelection()).length) kbdfield.focus({ preventScroll: true }); });
+document.addEventListener('paste', (e) => {
+	window.kernelpaste(e.clipboardData.getData('text'));
+	e.preventDefault();
+});
+
+/*
+ * where it boots from, as a machine's firmware: the disk's esp (an installed system: the
+ * installer put the kernel, its boot root and plan9.ini there) unless ?boot=net or a test's own
+ * init (?arg=, ?noinit); else the network's, this site's.  ?boot=disk the disk's whatever the args
+ */
+const usedisk = q.get('disk') !== '0' && (q.get('boot') === 'disk' || q.get('boot') !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
+const fromdisk = usedisk ? await diskboot().catch(() => null) : null;
+/*
+ * the loader: a disk whose boot FAT has its own firmware (index.html and platform.js, the
+ * installer's: inst/bootsetup) boots with it - the system, its firmware, kernel and plan9.ini,
+ * is the disk's until it is installed again.  This page gives the machine over to it, as a
+ * PC's firmware starts the disk's loader; window.plan9firmware is 'disk' in the disk's page
+ */
+if (fromdisk && !window.plan9firmware) {
+	const page = await fromdisk.get('index.html'), js = await fromdisk.get('platform.js');
+	if (page && js) {
+		window.plan9firmware = 'disk';
+		const url = URL.createObjectURL(new Blob([js], { type: 'text/javascript' }));
+		const html = new TextDecoder().decode(page).replace("from './platform.js'", "from '" + url + "'");
+		document.open();
+		document.write(html);
+		document.close();
+		await new Promise(() => {});	/* the disk's page has the machine */
+	}
+}
+if (fromdisk) pre.textContent += 'Plan9-wasm32 boots from the disk' + (window.plan9firmware === 'disk' ? ', its own firmware' : '') + '\n';
+/*
+ * ?iso=URL another, ?iso=file a local file the person chooses (nothing downloaded) - to boot
+ * the live image and install from it: a machine that boots from its disk is not asked for it
+ * again (the page after the installer's fshalt -r has the same URL); ?boot=net boots the live
+ * image again
+ */
+const iso = q.get('iso') === 'file' && fromdisk ? null : q.get('iso') ?? (fromdisk ? inival(fromdisk.conf, 'iso') : inival(ini, 'iso'));
+const isofile = iso === 'file' ? await new Promise((done) => {
+	const d = document.getElementById('isopick'), f = d.querySelector('input');
+	d.classList.add('on');
+	f.addEventListener('change', () => { if (f.files.length) { d.classList.remove('on'); done(f.files[0]); } });
+}) : null;
+boot(fromdisk ? fromdisk.kernel : '9wasm32.wasm', {
+	eia: (b) => { pre.textContent += dec.decode(b, { stream: true }); },
+	halt: (why) => {
+		/* the kernel's reboot (fshalt -r, #c/reboot): the page again, as a machine's firmware starts over */
+		if (why === 'reboot' && !q.has('noreboot')) { location.reload(); return; }
+		pre.textContent += '\n[halted: ' + why + ']\n';
+		if (!(q.get('console') === '1')) { const h = document.getElementById('halt'); h.textContent = 'Plan9-wasm32 halted: ' + why; h.style.display = 'block'; }
+	},
+	fs: args.length ? (fromdisk ? fromdisk.fs : await rootfs()) : undefined,
+	dist: isofile ? { file: isofile } : iso ? { url: new URL(iso, location.href).href } : null,
+	args,
+	/* the machine's disk (#S/sdW0): OPFS, ?disk=MB (4096: room for an installed system and its esp), ?disk=0 none */
+	disk: (q.get('disk') ?? '4096') !== '0' && navigator.storage?.getDirectory ? { name: 'sdW0', size: Number(q.get('disk') ?? 4096) * 1048576, fail: q.get('diskfail') } : null,
+	/* the disk's plan9.ini; a page's own init (?arg=) wins over its init= */
+	config: machine + (fromdisk ? iniconf(fromdisk.conf).replace(q.getAll('arg').length ? /^init=.*\n/mg : /$^/, '') : '') + q.getAll('conf').map((c) => c + '\n').join(''),
+	canvas: document.getElementById('screen'),
+	touchbutton: () => touchbutton,
+	screen: (([w, h]) => ({ w: Number(w) || ((q.get('console') === '1') ? 800 : innerWidth), h: Number(h) || ((q.get('console') === '1') ? 600 : innerHeight - barh) }))((q.get('screen') ?? '').split('x')),
+	/*
+	 * the machine's network: this origin's own gateway (its Ethernet's
+	 * frames: /ether), nothing a URL can change (a page pointed elsewhere
+	 * would be a man in the middle).  https: wss on this host; http only
+	 * on loopback, the next port (tools/serve's relay: offline and the
+	 * tests)
+	 */
+	ws: location.protocol === 'https:' ? `wss://${location.host}`
+		: /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname) ? `ws://${location.hostname}:${location.port ? +location.port + 1 : 8081}`
+		: 'ws://0.0.0.0:0',	/* none */
+	failfork: Number(q.get('failfork')) || 0,
+	failhelper: Number(q.get('failhelper')) || 0,
+	failrfmem: Number(q.get('failrfmem')) || 0,
+	bad: q.get('bad'),	/* a test's: a BootInfo the kernel must refuse (arch, rd, fb; platform.js) */
+	oldheader: q.has('oldheader'),	/* a test's: an older v1 loader's shorter header */
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+</$objtype/mkfile
+
+TARG=3l
+OFILES=\
+	obj.$O\
+	wasm.$O\
+
+HFILES=\
+	l.h\
+	../3c/3.out.h\
+
+BIN=/$objtype/bin
+</sys/src/cmd/mkone

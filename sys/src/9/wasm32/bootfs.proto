@@ -1,0 +1,114 @@
+# the wasm32 machine's boot file system (#R: the page gives it with the
+# kernel, as 9front's kernel has its bootfs.paq): what init, /boot/disk and
+# /boot/secstore run - the file servers a root can be (9660srv, hjfs,
+# gefs, cwfs64x, dossrv) and fstype - the network's ip/ipconfig and ndb/cs
+# with /lib/ndb - rc, rio and glenda's terminal (her profile's
+# webcookies and webfs, riostart's stats; rcpu).  rc's rcmain is its source's:
+# the release's /rc/lib/rcmain is older than its rc.  disk/mkfs's form:
+# name, mode, owner, group, and the file it is (from the tree's root; -
+# the same path); + all below.  tools/bootfs makes the archive.
+adm
+	timezone
+		GMT
+		local
+boot
+	init	- sys sys /sys/src/9/wasm32/init
+	console	- sys sys /sys/src/9/wasm32/console
+	disk	- sys sys /sys/src/9/wasm32/disk
+	secstore	- sys sys /sys/src/9/wasm32/secstore
+	factotum	- sys sys /wasm32/bin/auth/factotum
+bin	- sys sys /wasm32/bin
+	9660srv
+	basename
+	bind
+	cat
+	chmod
+	cleanname
+	cp
+	date
+	dd
+	dossrv
+	cwfs64x
+	echo
+	exportfs
+	gefs
+	gunzip
+	hjfs
+	ls
+	mkdir
+	mntgen
+	mount
+	mv
+	ns
+	plumb
+	plumber
+	ps
+	pwd
+	ramfs
+	rc
+	read
+	rio
+	rm
+	sed
+	sleep
+	sort
+	stats
+	tar
+	test
+	tlsclient
+	touch
+	unmount
+	wc
+	webcookies
+	webfs
+	xd
+	ip
+		ipconfig
+	ndb
+		cs
+	auth
+		aescbc
+		factotum
+		secstore
+	aux
+		kbdfs
+		seckeys
+	disk
+		edisk
+		format
+		mkext
+		mkfs
+		prep
+lib
+	ndb
+		local
+		common
+		dnsroot
+	font
+		bit
+			vga
+				+
+rc
+	bin
+		fstype
+		rconnect
+		rcpu
+		window
+		wloc
+	lib
+		rcmain	- sys sys /sys/src/cmd/rc/rcmain.plan9
+sys
+	lib
+		plumb
+			basic
+			fileaddr
+usr
+	glenda
+		bin
+			rc
+				riostart
+			wasm32	d775
+		lib
+			plumbing
+			profile
+		tmp	d775

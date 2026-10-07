@@ -1,0 +1,7 @@
+objtype=wasm32
+</$objtype/mkfile
+
+# wasm32 has no assembler of its own: all of libmp is port's C
+# (port/reduce culls nothing, this directory has no .c or .s)
+install all nuke clean:V:
+	# nothing

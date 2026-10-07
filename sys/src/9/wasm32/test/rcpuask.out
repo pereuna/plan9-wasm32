@@ -1,0 +1,18 @@
+ticks in it: ok
+
+!Adding key: dom=cirno proto=dp9ik
+user[glenda]: 
+password: 
+!
+remote: service cpu
+wasm32
+/mnt/term/boot/console
+/mnt/term/boot/disk
+/mnt/term/boot/factotum
+/mnt/term/boot/init
+/mnt/term/boot/secstore
+the terminal draws
+remote done
+rcpu status 
+key proto=dp9ik dom=cirno user=glenda !password?
+done

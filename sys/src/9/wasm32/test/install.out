@@ -1,0 +1,13 @@
+ticks in it: ok
+hjfs: fs is /dev/sdW0/fs
+init: the root is local!/dev/sdW0/fs -m 128
+init: warning: can't set priority: bad process or channel control request
+
+init: starting /bin/rc
+bootargs local!/dev/sdW0/fs -m 128
+/dist/9front
+/wasm32/bin/hjfs
+EET 7200 EET 10800
+2
+wasm32
+hjfs: ending

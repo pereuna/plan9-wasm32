@@ -1,0 +1,14 @@
+#
+#  the tests' /lib/ndb/local (test.proto): 9front's database, and the
+#  tests' network - tools/gateway -n, 10.0.2.0/24 - whose auth server for
+#  the domain cirno is tools/test/authsrv on 10.0.2.2 (tools/test/run)
+#
+database=
+	file=/net/ndb
+	file=/lib/ndb/local
+	file=/lib/ndb/common
+	file=/lib/ndb/dnsroot
+
+authdom=cirno auth=10.0.2.2
+
+ip=127.0.0.1 sys=localhost dom=localhost

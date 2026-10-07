@@ -1,0 +1,15 @@
+hello from 3c, 1 args, argv0 nil
+arg 0: hello
+42     7|7    | ff FF 10 18446744073709551615 -1234567890123
+3.141590 0.667 1e+100 1.234568e+04 0.0001
+str|     right|left      |tru
+x ☺ %q% %q%
+smprint 2+3=5 (13 bytes)
+0 3 5 7 10 12 14 17 19 21
+strtol -123 31 511
+atof 2500 sqrt 1.41421 pow 1024
+tokenize 4: a b c d
+rune e4 utflen 3
+3^40 -6289078614652622815
+cleanname /a/c/d
+malloc ok

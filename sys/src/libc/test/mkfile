@@ -1,0 +1,18 @@
+</$objtype/mkfile
+
+TEST=\
+	atomic\
+	date\
+	lock\
+	pow\
+	runebreak\
+	runenorm\
+	strchr\
+
+</sys/src/cmd/mktest
+
+/lib/ucd/%:
+	cd /lib/ucd && mk $stem
+
+runebreak.test:	/lib/ucd/GraphemeBreakTest.txt /lib/ucd/WordBreakTest.txt
+runenorm.test: /lib/ucd/NormalizationTest.txt
