@@ -18,7 +18,7 @@ rio plumb plumber stats clock acme sam
 # the network: ipconfig, cs and dns, TLS, the web (git's https), rcpu's
 ip/ipconfig ip/ping ndb/cs ndb/dns ndb/query
 exportfs tlsclient tlssrv webcookies webfs
-# the tools: the compilers, mk, the libraries' and source's (yacc, lex, APE's
-# pcc and cpp), and git
-3a 3c 3l ar cpp lex mk patch pcc size strip yacc
+# the tools: the compilers, mk, what the source's build runs (yacc, lex,
+# mpc: libsec's and libauthsrv's .mp; APE's pcc and cpp), and git
+3a 3c 3l ar cpp lex mk mpc patch pcc size strip yacc
 git/
