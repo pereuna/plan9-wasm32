@@ -1,0 +1,29 @@
+#!/bin/bash
+# https://plan2001.com/: the front page (tools/site/index.html: a CD - the
+# ISO to download - and a power button - the machine), the distribution's
+# ISO at /iso/ and the machine's page at /plan9-wasm32/, from tools/dist's
+# build/dist, onto the cloud server over the administrators' WireGuard
+# tunnel (Plan2001's tools/cloud/wg-admin up, with sudo) by tools/site/site.rc
+# there, through Plan2001's 9pterm and its admin password.
+#   tools/site/deploy [ADMIN-IP]	default 10.201.0.1; PLAN2001=~/Plan2001
+set -e
+here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
+admin=${1:-10.201.0.1}
+p2001=${PLAN2001:-$HOME/Plan2001}
+sec=${PLAN2001_CACHE:-$HOME/.cache/plan2001}/cloud
+T=$p2001/monolith/build/9pterm/9pterm
+d=$root/build/dist
+[ -s "$d/plan9-wasm32.iso" ] || { echo "deploy: no build/dist (PLAN9=... tools/dist)" >&2; exit 1; }
+[ -x "$T" ] || { echo "deploy: no $T (Plan2001's monolith/tools/build)" >&2; exit 1; }
+ping -c1 -W3 "$admin" >/dev/null 2>&1 || { echo "deploy: $admin does not answer: the tunnel ($p2001/tools/cloud/wg-admin up)" >&2; exit 1; }
+# the front page with the ISO's size and the tree it is
+s=$root/build/site
+rm -rf "$s"; mkdir -p "$s"
+size=$(( $(stat -c %s "$d/plan9-wasm32.iso") / 1048576 ))
+v="tree $(git -C "$root" rev-parse --short tree) · $(date -u +%Y-%m-%d)"
+sed "s|@ISO@|plan9-wasm32.iso, $size MB|; s|@VERSION@|$v|" "$here/index.html" >"$s/index.html"
+out=$("$T" -h "$admin" -a "tcp!$admin!567" -u admin -P "$sec/admin.pass" -W 20 -T "${TMO:-7200}" \
+	-c "rc /mnt/term$here/site.rc /mnt/term$s/index.html /mnt/term$d/live /mnt/term$d/plan9-wasm32.iso" 2>&1 || true)
+echo "$out"
+echo "$out" | grep -q SITE-DONE || { echo "deploy: not installed" >&2; exit 1; }
+echo "deploy: https://plan2001.com/"

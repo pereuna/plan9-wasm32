@@ -1,0 +1,55 @@
+#!/bin/rc
+# The site's files on the cloud server (https://plan2001.com/), run as admin
+# by tools/site/deploy through 9pterm, this tree and what it made through
+# /mnt/term:  rc site.rc PAGE LIVE ISO
+#   $web/index.html          the front page: the ISO and the power button
+#                            (Plan2001's own page kept as plan2001.html)
+#   $web/iso/plan9-wasm32.iso   the distribution, to download
+#   $web/plan9-wasm32/       the machine's page, kernel and boot file system;
+#                            plan9.ini cdboot=yes iso=file: the CD is the
+#                            person's own copy of the ISO
+# $web is tcp443's (rc-httpd: plan2001-static gives a directory's
+# index.html and FILE.gz to a browser that takes it)
+rfork e
+page=$1
+live=$2
+iso=$3
+fn fail { echo SITE FAILED: $*; exit $1 }
+fn step { echo '###' $* }
+fn put {	# FILE TARGET: whole, or not at all
+	cp $1 $2.new && mv $2.new $2 || fail $2
+}
+
+web=`{sed -n 's/.*web=([^ ]+).*/\1/p' /rc/bin/service/tcp443 | sed 1q}
+~ $#web 0 && web=/sys/lib/plan2001/web
+test -d $web || fail no $web
+
+step the ISO: $web/iso
+mkdir -p $web/iso
+put $iso $web/iso/plan9-wasm32.iso
+
+step the machine: $web/plan9-wasm32
+d=$web/plan9-wasm32
+mkdir -p $d
+for(f in $live/*){
+	b=`{basename $f}
+	switch($b){
+	case plan9-wasm32.iso plan9.ini plan9.ini.gz
+		;
+	case *
+		echo $b
+		put $f $d/$b
+	}
+}
+rm -f $d/plan9-wasm32.iso $d/plan9-wasm32.iso.gz $d/plan9.ini.gz
+{echo cdboot=yes; echo iso=file} >$d/plan9.ini
+
+step the front page
+if(test -f $web/index.html && ! test -f $web/plan2001.html)
+	cp $web/index.html $web/plan2001.html
+put $page $web/index.html
+rm -f $web/index.html.gz
+
+chmod 664 $web/index.html $web/iso/* $d/*
+ls -l $web/index.html $web/iso $d
+echo SITE-DONE
