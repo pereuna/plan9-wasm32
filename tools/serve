@@ -3,8 +3,8 @@
 # send it - cross-origin isolated (COOP, COEP: the machine's memory is a
 # SharedArrayBuffer its workers share), FILE.gz to a browser that takes
 # gzip, no caching (a new build is the page at once).  And on PORT+1 a
-# relay to the machine's network gateway (127.0.0.1:GATEWAY, a webterm:
-# the page's WebSockets go to the next port on loopback, kernel.html).
+# relay to the machine's network gateway (127.0.0.1:GATEWAY, tools/gateway:
+# the page's Ethernet WebSocket goes to the next port on loopback, kernel.html).
 # $PLAN9INI, if set, is the page's plan9.ini (GET /plan9.ini; else DIR's,
 # if it has one).  A Range request gets that part (206): the ISO, the
 # machine's read-only disk.  Offline, and the tests' page server.

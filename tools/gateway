@@ -3,9 +3,10 @@
 WebSocket to the page's origin (GET /ether, a frame a binary message each
 way; tools/serve's relay brings the page's here), and this is the other
 end of the wire - a switch, as a virtual machine's host has: each
-machine a port of it, and a TAP device another, its frames those of the
-host's network.  The switch learns where each address is and floods the
-rest, so machines on it reach each other as on a LAN.
+machine a port of it, and an uplink another - passt's network (the
+Internet as the host's programs reach it), or a TAP device's.  The
+switch learns where each address is and floods the rest, so machines on
+it reach each other as on a LAN.
 
 The wire is not trusted.  A message is one whole frame: a masked binary
 WebSocket frame with FIN, 14 to 1514 bytes (no fragments); anything else
@@ -20,6 +21,11 @@ a public site, which would need one before a port is given.  The
 switch does not hand a machine frames for another's address, so a card
 in promiscuous mode sees only its own, broadcast and multicast.
 
+  (none)  the Internet, no root needed: passt (Debian's passt package),
+      QEMU's user network's successor, its socket the uplink - the
+      machine's DHCP, DNS and its connections out are passt's, as the
+      host's own programs' (the machine has the host's address; passt
+      takes one machine's at a time)
   -n  a network of its own, no root needed: a user and network namespace
       with tap0 in it, 10.0.2.2/24 (QEMU's user network's addresses, the
       machine 10.0.2.15 and up, but not its NAT: the network goes no
@@ -35,9 +41,9 @@ in promiscuous mode sees only its own, broadcast and multicast.
   -o ORIGIN  a page's origin that may connect (http://host:port), more
       than one -o for more
 
-  tools/gateway [-p PORT] [-o ORIGIN]... (-n | -t NAME [-d]) [-- CMD...]	PORT 17080
+  tools/gateway [-p PORT] [-o ORIGIN]... [-n | -t NAME [-d]] [-- CMD...]	PORT 17080
 """
-import asyncio, base64, ctypes, fcntl, hashlib, ipaddress, os, re, socket, struct, subprocess, sys, time
+import asyncio, base64, ctypes, fcntl, hashlib, ipaddress, os, re, shutil, socket, struct, subprocess, sys, tempfile, time
 
 port = 17080
 tapname = None
@@ -61,8 +67,11 @@ while a:
 		cmd = a[1:]; a = []
 	else:
 		sys.exit(__doc__)
-if ownnet == (tapname is not None):
+if ownnet and tapname is not None:
 	sys.exit(__doc__)
+usepasst = not ownnet and tapname is None
+if usepasst and not shutil.which('passt'):
+	sys.exit('gateway: no passt (sudo apt install passt), or -n: a network of its own, no way out')
 
 NET = ipaddress.IPv4Network('10.0.2.0/24')
 GW = ipaddress.IPv4Address('10.0.2.2')
@@ -91,13 +100,16 @@ if ownnet:
 		f.write(f'0 {gid} 1')
 	tapname = 'tap0'
 
-TUNSETIFF, IFF_TAP, IFF_NO_PI = 0x400454ca, 0x0002, 0x1000
-tap = os.open('/dev/net/tun', os.O_RDWR | os.O_NONBLOCK)
-fcntl.ioctl(tap, TUNSETIFF, struct.pack('16sH', tapname.encode(), IFF_TAP | IFF_NO_PI))
-if ownnet:
-	for c in (['ip', 'link', 'set', 'lo', 'up'], ['ip', 'link', 'set', 'tap0', 'up'], ['ip', 'addr', 'add', f'{GW}/{NET.prefixlen}', 'dev', 'tap0']):
-		subprocess.run(c, check=True)
-log(f'ws://127.0.0.1:{port}/ether, {tapname}' + (f' {GW}/{NET.prefixlen}' if ownnet else '') + (', DHCP' if dhcp else ''))
+tap = None
+if not usepasst:
+	TUNSETIFF, IFF_TAP, IFF_NO_PI = 0x400454ca, 0x0002, 0x1000
+	tap = os.open('/dev/net/tun', os.O_RDWR | os.O_NONBLOCK)
+	fcntl.ioctl(tap, TUNSETIFF, struct.pack('16sH', tapname.encode(), IFF_TAP | IFF_NO_PI))
+	if ownnet:
+		for c in (['ip', 'link', 'set', 'lo', 'up'], ['ip', 'link', 'set', 'tap0', 'up'], ['ip', 'addr', 'add', f'{GW}/{NET.prefixlen}', 'dev', 'tap0']):
+			subprocess.run(c, check=True)
+log(f'ws://127.0.0.1:{port}/ether, ' + ('passt: the Internet' if usepasst else tapname) + (f' {GW}/{NET.prefixlen}' if ownnet else '') + (', DHCP' if dhcp else ''))
+prctl = ctypes.CDLL(None, use_errno=True).prctl	# a child ends with this (PR_SET_PDEATHSIG)
 
 class Port:
 	def __init__(self, name, send, machine=False):
@@ -224,8 +236,52 @@ def tapsend(f):
 	except (BlockingIOError, OSError):
 		pass	# full or down: dropped, as a wire would
 
-tapport = Port(tapname, tapsend)
-ports.append(tapport)
+if tap is not None:
+	tapport = Port(tapname, tapsend)
+	ports.append(tapport)
+
+# passt: a port of the switch - its socket, as QEMU's stream netdev talks to it: each frame its
+# length, 4 bytes big-endian, then its bytes; passt again if it goes
+async def passtport():
+	d = tempfile.mkdtemp(prefix='gateway-passt')
+	sock = os.path.join(d, 'passt.sock')
+	while True:
+		p = subprocess.Popen(['passt', '-f', '-q', '-s', sock], preexec_fn=lambda: prctl(1, 15))
+		for _ in range(100):
+			if os.path.exists(sock):
+				break
+			await asyncio.sleep(0.05)
+		try:
+			r, w = await asyncio.open_unix_connection(sock)
+		except OSError as e:
+			log(f'passt: {e}')
+			p.kill()
+			await asyncio.sleep(5)
+			continue
+		def send(f):
+			if w.transport.get_write_buffer_size() < 1024*1024:
+				w.write(struct.pack('!I', len(f)) + f)
+		me = Port('passt', send)
+		ports.append(me)
+		try:
+			while True:
+				n = struct.unpack('!I', await r.readexactly(4))[0]
+				f = await r.readexactly(n)
+				switch(me, f)
+		except (asyncio.IncompleteReadError, ConnectionError):
+			log('passt: gone; again')
+		finally:
+			ports.remove(me)
+			for k in [k for k, v in where.items() if v[0] is me]:
+				del where[k]
+			w.close()
+			p.kill()
+			p.wait()
+			try:
+				os.remove(sock)
+			except OSError:
+				pass
+		await asyncio.sleep(1)
 
 def tapread():
 	while True:
@@ -305,12 +361,13 @@ async def machine(r, w):
 
 async def main():
 	loop = asyncio.get_running_loop()
-	loop.add_reader(tap, tapread)
+	if tap is not None:
+		loop.add_reader(tap, tapread)
+	else:
+		asyncio.create_task(passtport())
 	srv = await asyncio.start_server(machine, sock=lsock)
 	child = None
 	if cmd:
-		# it ends with this (PR_SET_PDEATHSIG)
-		prctl = ctypes.CDLL(None, use_errno=True).prctl
 		child = await asyncio.create_subprocess_exec(*cmd, preexec_fn=lambda: prctl(1, 15))
 	async with srv:
 		if child:

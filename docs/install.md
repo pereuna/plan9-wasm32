@@ -37,7 +37,7 @@ After the install, on the machine (as 9front's sysupdate):
     mk install                  # the rest of the system, built here
 
 and to update it, from this repository (the machine's network must
-reach GitHub: a gateway with a way out, `tools/gateway -t`):
+reach GitHub: `tools/gateway`, passt's, as offline the page's own):
 
     bind -ac /dist/9front /
     cd / && git/pull            # origin: https://github.com/pereuna/plan9-wasm32, branch tree

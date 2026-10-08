@@ -43,7 +43,9 @@ WebSocket to the page's origin (`/ether`); `tools/serve` relays it to
 `tools/gateway`, the other end - a switch with a TAP device, 9front's
 DHCP, TCP and the rest over it (`docs/kernel.md`):
 
-    tools/gateway -n         # a network of its own, 10.0.2.0/24, DHCP; no root
+    tools/gateway            # the Internet, as the host's programs reach it: passt
+                             #   (sudo apt install passt, once); no root
+    tools/gateway -n         # a network of its own, 10.0.2.0/24, DHCP, no way out (the tests)
     tools/gateway -t tap0    # a TAP made by root, bridged or NATed to the LAN
 
 Try it: https://plan2001.com/plan9-wasm32/ (a live image, as 9front's ISO:

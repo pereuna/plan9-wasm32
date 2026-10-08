@@ -58,10 +58,11 @@ the WebSocket is not open or is full.  The link is up while it is open.
 A frame shorter than its header or longer than 1514 bytes is dropped
 both ways, never cut to size: the wire is not trusted.  The other end is
 the machine's gateway (`tools/gateway`): a switch, the machines on it
-and a TAP device its ports - a network of its own with DHCP (`-n`, no
-root needed; QEMU's user network's addresses but not its NAT: it reaches
-the host's namespace and the machines on it, no further) or the host's
-(`-t`, bridged or NATed by root).  It takes whole frames only, one MAC
+and an uplink its ports - by default passt, QEMU's user network's
+successor (no root: the machine's DHCP, DNS and connections out are
+passt's, as the host's own programs'), or a network of its own with
+DHCP and no way out (`-n`, the tests: QEMU's user network's addresses),
+or a TAP device (`-t`, bridged or NATed by root).  It takes whole frames only, one MAC
 address a machine, pages of its allowed origins (`-o`, loopback
 without), and bounds its table; it has no authentication, so it is not
 yet for a public site.  As a learning switch it gives a machine only its
