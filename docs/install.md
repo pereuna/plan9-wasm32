@@ -111,7 +111,9 @@ in a name space of its own: the root, bound before `/` for 9front's init,
 is not in the server's, or its halt (fshalt) would walk through itself.
 
 `?boot=net` boots the live image again (to install anew); `?disk=0` boots
-without the disk.
+without the disk.  `?boot=` and `?iso=` are for one boot, as a PC boots
+once from its CD: the reboot (`fshalt -r`, the installer's finish) loads
+the page without them, so the installed system boots from its disk.
 
 ## The tests
 

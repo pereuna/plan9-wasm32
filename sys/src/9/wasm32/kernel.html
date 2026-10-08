@@ -210,8 +210,18 @@ const isofile = iso === 'file' ? await new Promise((done) => {
 boot(fromdisk ? fromdisk.kernel : '9wasm32.wasm', {
 	eia: (b) => { pre.textContent += dec.decode(b, { stream: true }); },
 	halt: (why) => {
-		/* the kernel's reboot (fshalt -r, #c/reboot): the page again, as a machine's firmware starts over */
-		if (why === 'reboot' && !q.has('noreboot')) { location.reload(); return; }
+		/*
+		 * the kernel's reboot (fshalt -r, #c/reboot): the page again, as a machine's firmware
+		 * starts over - without ?boot= and ?iso=, which were for one boot (the live image's, to
+		 * install: as a PC boots once from its CD): the installed system boots from its disk
+		 */
+		if (why === 'reboot' && !q.has('noreboot')) {
+			const u = new URL(location.href);
+			u.searchParams.delete('boot');
+			u.searchParams.delete('iso');
+			if (u.href === location.href) location.reload(); else location.replace(u.href);
+			return;
+		}
 		pre.textContent += '\n[halted: ' + why + ']\n';
 		if (!(q.get('console') === '1')) { const h = document.getElementById('halt'); h.textContent = 'Plan9-wasm32 halted: ' + why; h.style.display = 'block'; }
 	},
