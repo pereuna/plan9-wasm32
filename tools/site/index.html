@@ -26,6 +26,17 @@
 	footer a { display: inline; padding: 0; text-decoration: underline; }
 	footer p { margin: 0 0 10px; }
 	footer code { font: 12px ui-monospace, monospace; white-space: nowrap; }
+	#bios { cursor: pointer; }
+	dialog { border: 3px solid var(--ring); border-radius: 18px; background: var(--face); color: var(--fg); padding: 22px 26px; max-width: 26em; }
+	dialog::backdrop { background: rgb(0 0 0 / .35); }
+	dialog h2 { margin: 0 0 14px; font-size: 18px; }
+	dialog fieldset { border: 0; margin: 0 0 14px; padding: 0; }
+	dialog legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+	dialog label { display: block; margin: 4px 0; }
+	dialog .note { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
+	dialog .buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+	dialog button { font: inherit; padding: 7px 14px; border-radius: 10px; border: 2px solid var(--ring); background: var(--bg); color: var(--fg); cursor: pointer; }
+	dialog button.main { background: var(--fg); color: var(--bg); }
 	#power .led { fill: var(--dim); transition: fill .15s; }
 	#power:hover .led, #power:focus-visible .led { fill: var(--glow); }
 </style>
@@ -60,7 +71,63 @@
 		<span class="label">Power on</span>
 		<span class="sub">boots from the browser's disk, or the CD you give it</span>
 	</a>
+	<a id="bios" href="#bios" title="BIOS: the boot order and devices">
+		<svg viewBox="0 0 200 200" aria-hidden="true">
+			<g stroke="var(--ring)" stroke-width="8" stroke-linecap="round">
+				<line x1="62" y1="22" x2="62" y2="44"/><line x1="100" y1="22" x2="100" y2="44"/><line x1="138" y1="22" x2="138" y2="44"/>
+				<line x1="62" y1="156" x2="62" y2="178"/><line x1="100" y1="156" x2="100" y2="178"/><line x1="138" y1="156" x2="138" y2="178"/>
+				<line x1="22" y1="62" x2="44" y2="62"/><line x1="22" y1="100" x2="44" y2="100"/><line x1="22" y1="138" x2="44" y2="138"/>
+				<line x1="156" y1="62" x2="178" y2="62"/><line x1="156" y1="100" x2="178" y2="100"/><line x1="156" y1="138" x2="178" y2="138"/>
+			</g>
+			<rect x="44" y="44" width="112" height="112" rx="14" fill="var(--face)" stroke="var(--ring)" stroke-width="4"/>
+			<text x="100" y="110" text-anchor="middle" font-family="ui-monospace, monospace" font-weight="700" font-size="28" fill="var(--fg)">BIOS</text>
+		</svg>
+		<span class="label">BIOS</span>
+		<span class="sub">the boot order and devices</span>
+	</a>
 </main>
+<dialog id="setup">
+	<form method="dialog">
+		<h2>BIOS setup</h2>
+		<fieldset>
+			<legend>Boot order</legend>
+			<label><input type="radio" name="order" value="disk,cd"> Disk, then CD</label>
+			<label><input type="radio" name="order" value="cd,disk"> CD, then disk</label>
+		</fieldset>
+		<fieldset>
+			<legend>Boot devices</legend>
+			<label><input type="checkbox" name="disk"> Disk (this browser's)</label>
+			<label><input type="checkbox" name="cd"> CD (the ISO you downloaded)</label>
+		</fieldset>
+		<p class="note">Kept in this browser. "Boot once from CD" installs anew without changing them: the
+		installer's reboot boots as they say.</p>
+		<div class="buttons">
+			<button value="cancel" formnovalidate>Cancel</button>
+			<button value="once">Boot once from CD</button>
+			<button value="save" class="main">Save</button>
+		</div>
+	</form>
+</dialog>
+<script>
+	/* the BIOS's settings, read by the machine's firmware (/plan9-wasm32/: its kernel.html) */
+	const key = 'plan9-wasm32 bios', d = document.getElementById('setup'), f = d.querySelector('form');
+	const load = () => { try { return JSON.parse(localStorage.getItem(key) ?? '{}') ?? {}; } catch (e) { return {}; } };
+	document.getElementById('bios').addEventListener('click', (e) => {
+		e.preventDefault();
+		const b = load();
+		f.order.value = (b.order ?? ['disk', 'cd']).join(',');
+		f.disk.checked = b.disk !== false;
+		f.cd.checked = b.cd !== false;
+		d.showModal();
+	});
+	d.addEventListener('close', () => {
+		if (d.returnValue === 'save') {
+			try { localStorage.setItem(key, JSON.stringify({ order: f.order.value.split(','), disk: f.disk.checked, cd: f.cd.checked })); } catch (e) {}
+		} else if (d.returnValue === 'once')
+			location.href = '/plan9-wasm32/?boot=net&iso=file';
+	});
+	if (location.hash === '#bios') document.getElementById('bios').click();
+</script>
 <footer>
 	<p>9front for the wasm32 architecture: the web browser is the machine.</p>
 	<p>The install is <a href="https://fqa.9front.org/fqa4.html">9front's</a> (inst/start), except that

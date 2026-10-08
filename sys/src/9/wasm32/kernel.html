@@ -34,7 +34,7 @@
 <canvas id="screen" width="800" height="600"></canvas>
 <pre id="eia0"></pre>
 <pre id="halt"></pre>
-<div id="isopick"><p>No system on this browser's disk: insert the CD - choose the distribution's ISO image you downloaded (plan9-wasm32.iso). The machine reads it as its CD, sdW1, from this computer's disk; nothing is uploaded.</p><input type="file" accept=".iso,application/x-iso9660-image"></div>
+<div id="isopick"><p>Insert the CD: choose the distribution's ISO image you downloaded (plan9-wasm32.iso). The machine reads it as its CD, sdW1, from this computer's disk; nothing is uploaded.</p><input type="file" accept=".iso,application/x-iso9660-image"><p><a href="?boot=disk&amp;iso=none">Boot without the CD</a> (from the disk, if it has a system)</p></div>
 <div id="bar"><button data-k="kbd">kbd</button><button data-b="1" class="on">m1</button><button data-b="2">m2</button><button data-b="4">m3</button><button data-k="Escape">esc</button><button data-k="Tab">tab</button><button data-k="ctrl">ctl</button><button data-k="Delete">del</button><button data-k="ArrowLeft">←</button><button data-k="ArrowUp">↑</button><button data-k="ArrowDown">↓</button><button data-k="ArrowRight">→</button></div>
 <textarea id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="keyboard"></textarea>
 <script type="module">
@@ -174,7 +174,15 @@ document.addEventListener('paste', (e) => {
  * installer put the kernel, its boot root and plan9.ini there) unless ?boot=net or a test's own
  * init (?arg=, ?noinit); else the network's, this site's.  ?boot=disk the disk's whatever the args
  */
-const usedisk = q.get('disk') !== '0' && (q.get('boot') === 'disk' || q.get('boot') !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
+/*
+ * the BIOS's settings (the site's front page, its BIOS button; this origin's localStorage,
+ * 'plan9-wasm32 bios': { order: ['disk', 'cd'], disk: true, cd: true }): the boot order and
+ * the devices that may boot - the disk not booted from is still the machine's, a CD turned off
+ * is none.  The URL's ?boot= and ?iso= win, for one boot
+ */
+const bios = (() => { try { return JSON.parse(localStorage.getItem('plan9-wasm32 bios') ?? '{}') ?? {}; } catch (e) { return {}; } })();
+const boot = q.get('boot') ?? (bios.disk === false || (bios.order ?? [])[0] === 'cd' && bios.cd !== false ? 'net' : null);
+const usedisk = q.get('disk') !== '0' && (boot === 'disk' || boot !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
 const fromdisk = usedisk ? await diskboot().catch(() => null) : null;
 /*
  * the loader: a disk whose boot FAT has its own firmware (index.html and platform.js, the
@@ -201,7 +209,8 @@ if (fromdisk) pre.textContent += 'Plan9-wasm32 boots from the disk' + (window.pl
  * again (the page after the installer's fshalt -r has the same URL); ?boot=net boots the live
  * image again
  */
-const iso = q.get('iso') === 'file' && fromdisk ? null : q.get('iso') ?? (fromdisk ? inival(fromdisk.conf, 'iso') : inival(ini, 'iso'));
+let iso = q.get('iso') === 'file' && fromdisk ? null : q.get('iso') ?? (bios.cd === false ? null : fromdisk ? inival(fromdisk.conf, 'iso') : inival(ini, 'iso'));
+if (iso === 'none') iso = null;	/* no CD in the drive: the chooser's "without the CD" */
 const isofile = iso === 'file' ? await new Promise((done) => {
 	const d = document.getElementById('isopick'), f = d.querySelector('input');
 	d.classList.add('on');
