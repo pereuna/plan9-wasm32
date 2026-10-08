@@ -43,10 +43,14 @@ the server (`tools/site/deploy`) is listed last.
    as the host owner, after the network is up (it reads the default
    route). It makes its pkt interface (100.64.0.1/24), turns on IP
    forwarding (9front's is the stack's, all interfaces), and adds a
-   source-specific default route with translation for 100.64.0.0/24 only.
-   Nothing else is forwarded: the cloud's security list lets only 443, 53
-   and 51820 in, and the server's own services (`localonly`: 10.*,
-   192.168.*) never see 100.64.0.0/24, which ethernetd does not let
+   default route with translation (the default one's gateway and
+   interface; the stack translates only what it forwards). Not a
+   source-specific one: WireGuard's outer packets are routed without a
+   source, take such a route's source range, and one for 100.64.0.0/24
+   cut the tunnel (docs/network.md). Little else is forwarded: the
+   cloud's security list lets only 443, 53 and 51820 in (a WireGuard peer
+   could route through it), and the server's own services (`localonly`:
+   10.*, 192.168.*) never see 100.64.0.0/24, which ethernetd does not let
    reach the server.
 5. **Headers** (Codex's review, F): HSTS
    (`Strict-Transport-Security: max-age=31536000`) and

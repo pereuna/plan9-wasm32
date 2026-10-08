@@ -34,7 +34,8 @@
  * 100.64.0.0/24: not the 10.* or 192.168.* this server's own services
  * trust), the gateway its .1, which answers its ARP, DHCP and ping; the rest
  * goes into this machine's IP stack through a pkt interface, and out with
- * its address (source translation, the route's t: 9front's NAT).  What goes
+ * its address (source translation, the default route's t: 9front's NAT,
+ * which translates what is forwarded only).  What goes
  * out: its own address only, TCP to ports 80, 443 and 9418, DNS (UDP and
  * TCP 53) to the resolvers (-D), ICMP echo; not to this machine, nor the
  * private, shared, link-local (the cloud's metadata), multicast or reserved
@@ -1349,6 +1350,28 @@ defaultroute(void)
 		sysfatal("no default route: -g gate ifc");
 }
 
+/* routes with NET as their source (an earlier ethernetd's: 2026-10-08's cut the tunnel) removed */
+static void
+oldroutes(int rfd)
+{
+	Biobuf *b;
+	char *l, *f[10];
+	uchar a[4];
+	char src[32];
+
+	hnputl(a, net);
+	snprint(src, sizeof src, "%V", a);
+	if((b = Bopen("/net/iproute", OREAD)) == nil)
+		return;
+	while((l = Brdstr(b, '\n', 1)) != nil){
+		if(tokenize(l, f, nelem(f)) == 8 && strcmp(f[6], src) == 0 && f[3][0] == '4'
+		&& fprint(rfd, "del %s %s %s %s %s %s %s", f[0], f[1], f[2], f[3], f[5], f[6], f[7]) >= 0)
+			elog("an old route removed: %s %s via %s from %s %s", f[0], f[1], f[2], f[6], f[7]);
+		free(l);
+	}
+	Bterm(b);
+}
+
 static void
 netsetup(void)
 {
@@ -1374,11 +1397,18 @@ netsetup(void)
 	snprint(path, sizeof path, "/net/ipifc/%d/data", atoi(buf));
 	if((netfd = open(path, ORDWR)) < 0)
 		sysfatal("%s: %r", path);
-	/* the machines' route out: the default one's, translated (NAT) */
+	/*
+	 * the machines' route out: the default one's gateway and interface,
+	 * translated (NAT: only what is forwarded is, never this machine's own).
+	 * Not source specific (for 100.64.0.0/24 only): a lookup without a
+	 * source - a WireGuard tunnel's outer packets (Plan2001's devwg) - takes
+	 * any source specific route and a source from its range, and with this
+	 * one the server's tunnel answered from 100.64.0.x, into nowhere
+	 */
 	if((rfd = open("/net/iproute", OWRITE)) < 0)
 		sysfatal("/net/iproute: %r");
-	hnputl(a, net);
-	if(fprint(rfd, "add 0.0.0.0 0.0.0.0 %s 4t %s %V %V", gate, gateifc, a, m) < 0)
+	oldroutes(rfd);
+	if(fprint(rfd, "add 0.0.0.0 0.0.0.0 %s 4t %s 0.0.0.0 0.0.0.0", gate, gateifc) < 0)
 		sysfatal("the route out: %r");
 	close(rfd);
 	/* cfd stays open: the interface is gone when it is closed */

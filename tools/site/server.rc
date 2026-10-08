@@ -1,0 +1,219 @@
+#!/bin/rc
+# plan2001.com's server for plan9-wasm32's site (docs/plan2001-server.md,
+# docs/network.md), run as admin (the host owner) by tools/site/deploy -s
+# through 9pterm, this tree through /mnt/term:  rc server.rc SRC
+# Each step can be run again.  What it changes is copied first to
+# /sys/lib/plan2001/backup/DATE; what it turns off is renamed (! before a
+# service's name), not removed; the web accounts' data is not touched.
+#   - aux/ethernetd, aux/etherws: SRC's sys/src/cmd/ethergw built here
+#   - auth.plan2001.com's page: /sys/lib/plan2001/auth/index.html
+#   - rc-httpd's select-handler: by host - auth.plan2001.com its page and
+#     GET /auth, plan2001.com the site and GET /ether, both the WebSockets
+#     of aux/etherws; HSTS, nosniff, the auth page's CSP
+#   - tcp443: the connection's directory for etherws's log ($net)
+#   - the certificate: one for plan2001.com and auth.plan2001.com
+#     (acmechallenge maps NAME.plan2001.com to NAME.cpu.plan2001.com's
+#     challenge, the zone this server answers for; certrenew renews it)
+#   - cpustart: aux/ethernetd; Plan2001's crsrv, compute pool, secstored
+#     and weblimitd out
+#   - off: webterm (17080), the development https (17443), distd (17050),
+#     signupd (17040), passkeyd (17041), the apps' names in the zone,
+#     Plan2001's machine page (plan2001.html)
+#   - aux/ethernetd (re)started; stopped again in 3 minutes, its route
+#     removed, unless deploy confirms its tunnel still answers
+rfork e
+src=$1
+fn fail { echo SERVER FAILED: $*; exit $1 }
+fn step { echo '###' $* }
+cfg=/cfg/$sysname
+web=/sys/lib/plan2001/web
+auth=/sys/lib/plan2001/auth
+tls=/sys/lib/tls
+bk=/sys/lib/plan2001/backup/`{date -n}
+fn save {	# FILE...: a copy in $bk, its path kept
+	for(f){
+		if(test -e $f){
+			mkdir -p $bk^`{basename -d $f} && cp $f $bk^$f || fail save $f
+		}
+	}
+}
+mkdir -p $bk || fail $bk
+echo backup: $bk
+
+step the gateway: aux/ethernetd, aux/etherws
+b=/tmp/ethergw.build
+rm -rf $b
+mkdir -p $b
+cp $src/sys/src/cmd/ethergw/* $b/ || fail ethergw source
+@{cd $b && mk install} || fail ethergw build
+rm -rf $b
+ls -l /$objtype/bin/aux/ethernetd /$objtype/bin/aux/etherws
+
+step the auth page: $auth
+mkdir -p $auth
+cp $src/tools/site/auth.html $auth/index.html.new && mv $auth/index.html.new $auth/index.html || fail auth page
+chmod 664 $auth/index.html
+
+step rc-httpd: the select-handler
+save /rc/bin/rc-httpd/select-handler
+cat >/rc/bin/rc-httpd/select-handler <<'X'
+#!/bin/rc
+# plan2001.com's site (plan9-wasm32's tools/site/server.rc), for 9front's
+# rc-httpd behind tlssrv (/rc/bin/service/tcp443): by host,
+# auth.plan2001.com - the network's passkey page, its WebSocket /auth -
+# and plan2001.com - the front page, the ISO, the machine, its network's
+# WebSocket /ether (docs/network.md).  The WebSockets are aux/etherws's,
+# each path's origin its own.  rc-httpd sources this file: $location,
+# $SERVER_NAME and $reqlines are its.
+if(~ $#web 0)
+	web=/sys/lib/plan2001/web
+extra_headers=($extra_headers 'Strict-Transport-Security: max-age=31536000' 'X-Content-Type-Options: nosniff')
+fn etherws { exec /bin/aux/etherws -r -A https://auth.plan2001.com -E https://plan2001.com }
+switch($SERVER_NAME){
+case auth.plan2001.com
+	extra_headers=($extra_headers 'Content-Security-Policy: default-src ''self''; script-src ''self'' ''unsafe-inline''; style-src ''self'' ''unsafe-inline''; connect-src wss://auth.plan2001.com; frame-ancestors ''none''; base-uri ''none''; form-action ''none''')
+	switch($location){
+	case /auth
+		etherws
+	case *
+		exec $rc_httpd_dir/handlers/plan2001-static /sys/lib/plan2001/auth
+	}
+case *
+	switch($location){
+	case /ether
+		etherws
+	case *
+		exec $rc_httpd_dir/handlers/plan2001-static $web
+	}
+}
+X
+chmod 775 /rc/bin/rc-httpd/select-handler
+
+step tcp443
+save /rc/bin/service/tcp443
+cat >/rc/bin/service/tcp443 <<'X'
+#!/bin/rc
+# https: plan2001.com and auth.plan2001.com (plan9-wasm32's
+# tools/site/server.rc): rc-httpd and its select-handler, with the Let's
+# Encrypt certificate for both (certrenew), else *.cpu.plan2001.com's,
+# else the development one; $net the connection's directory (etherws's
+# log has the browser's address from it)
+crt=/sys/lib/tls/acmed/plan2001.com.crt
+test -s $crt || crt=/sys/lib/tls/acmed/cpu.plan2001.com.crt
+test -s $crt || crt=/sys/lib/tls/monolith.pem
+~ $#3 0 || net=$3
+web=/sys/lib/plan2001/web exec tlssrv -c $crt /rc/bin/rc-httpd/rc-httpd
+X
+chmod 775 /rc/bin/service/tcp443
+
+step the certificate: acmechallenge, plan2001.com.csr
+save /rc/bin/acmechallenge $tls/acmed/plan2001.com.csr $tls/acmed/plan2001.com.crt
+cat >/rc/bin/acmechallenge <<'X'
+#!/bin/rc
+# acmed -e: method, subject, token, response.  dns-01 in this machine's
+# own zone (cpu.plan2001.com); a subject outside it through its CNAME
+# there: _acme-challenge.plan2001.com -> _acme-challenge.cpu.plan2001.com,
+# _acme-challenge.NAME.plan2001.com -> _acme-challenge.NAME.cpu.plan2001.com
+# (plan9-wasm32's tools/site/server.rc).  acmed asks for one at a time
+rfork e
+if(! ~ $1 dns-01)
+	exit 'not dns-01'
+dom=`{echo $2 | sed 's/^\*\.//'}
+switch($dom){
+case cpu.plan2001.com *.cpu.plan2001.com
+	;
+case plan2001.com
+	dom=cpu.plan2001.com
+case *.plan2001.com
+	dom=`{echo $dom | sed 's/\.plan2001\.com$/.cpu.plan2001.com/'}
+case *
+	exit 'not ours'
+}
+{
+	echo 'dom=_acme-challenge.'^$dom^' soa='
+	echo '	txt="'^$4^'"'
+} >/lib/ndb/dnschallenge || exit 'no dnschallenge'
+echo refresh >/net/dns
+X
+chmod 775 /rc/bin/acmechallenge
+auth/rsa2csr 'CN=plan2001.com,auth.plan2001.com' $tls/cpu.plan2001.com.key >$tls/acmed/plan2001.com.csr.new || fail csr
+mv $tls/acmed/plan2001.com.csr.new $tls/acmed/plan2001.com.csr
+# a certificate now, if the one there does not name auth.plan2001.com
+if(! auth/pemdecode CERTIFICATE $tls/acmed/plan2001.com.crt >[2]/dev/null | strings | grep -s 'auth\.plan2001\.com'){
+	test -e /mnt/web/clone || webfs
+	if(auth/acmed -e /rc/bin/acmechallenge hostmaster@plan2001.com $tls/acmed/plan2001.com.csr >$tls/acmed/plan2001.com.crt.new >[2]/tmp/acmed.err && test -s $tls/acmed/plan2001.com.crt.new){
+		mv $tls/acmed/plan2001.com.crt.new $tls/acmed/plan2001.com.crt
+		echo `{date} plan2001.com auth.plan2001.com renewed >>/sys/log/certrenew
+		echo the certificate: renewed
+	}
+	if not {
+		cat /tmp/acmed.err
+		rm -f $tls/acmed/plan2001.com.crt.new
+		fail certificate
+	}
+}
+if not
+	echo the certificate names auth.plan2001.com already
+
+step cpustart
+save $cfg/cpustart
+grep -v '^(crsrv |mount -c /srv/compute |auth/secstored|aux/weblimitd)' $cfg/cpustart | grep -v 'ethernetd|/adm/ether|/sys/log/ether|machines. network' >/tmp/cpustart || fail cpustart
+cat >>/tmp/cpustart <<'X'
+# plan9-wasm32's site: the machines' network (tools/site/server.rc, docs/network.md)
+mkdir -p /adm/ether/cred && chmod 700 /adm/ether
+test -e /sys/log/ether || { touch /sys/log/ether && chmod 666 /sys/log/ether }
+test -x /bin/aux/ethernetd && aux/ethernetd -r auth.plan2001.com -o https://auth.plan2001.com &
+X
+cp /tmp/cpustart $cfg/cpustart || fail cpustart
+cat $cfg/cpustart
+
+step off: the Plan2001 services
+for(s in /rc/bin/service/tcp17080 /rc/bin/service/tcp17443 /rc/bin/service/tcp17050 /rc/bin/service.auth/tcp17040 /rc/bin/service.auth/tcp17041){
+	if(test -e $s){
+		save $s
+		mv $s `{basename -d $s}^/!^`{basename $s} && echo off: $s
+	}
+}
+for(p in crsrv secstored weblimitd distd)
+	kill $p | rc
+if(test -e $web/plan2001.html){
+	save $web/plan2001.html
+	rm -f $web/plan2001.html $web/plan2001.html.gz && echo off: $web/plan2001.html
+}
+
+step the zone: the names of the apps out
+save /lib/ndb/local
+grep -v '^dom=[a-z0-9]+\.cpu\.plan2001\.com ip=' /lib/ndb/local >/tmp/ndb || fail ndb
+if(! cmp -s /tmp/ndb /lib/ndb/local){
+	cp /tmp/ndb /lib/ndb/local || fail ndb
+	echo refresh >/net/dns
+	echo 'the apps'' names removed'
+}
+
+step aux/ethernetd
+mkdir -p /adm/ether/cred && chmod 700 /adm/ether
+test -e /sys/log/ether || { touch /sys/log/ether && chmod 666 /sys/log/ether }
+if(ps | grep -s ' ethernetd$')
+	kill ethernetd | rc	# the new one
+sleep 1
+# a dead man's switch: unless deploy says, in 3 minutes, that its tunnel
+# still answers (/adm/ether/ok), ethernetd goes and its route with it - the
+# administrators' only way in is that tunnel (2026-10-08: a route of an
+# earlier ethernetd cut it)
+rm -f /adm/ether/ok
+@{rfork s; aux/ethernetd -r auth.plan2001.com -o https://auth.plan2001.com </dev/null >/dev/null >[2=1] &}
+@{
+	rfork s
+	sleep 180
+	if(! test -e /adm/ether/ok){
+		kill ethernetd | rc
+		grep '^0\.0\.0\.0 .* 4t ' /net/iproute | awk '{print "del", $1, $2, $3, $4, $6, $7, $8}' >/net/iproute
+		echo `{date} ethernetd stopped: the tunnel was not confirmed >>/sys/log/ether
+	}
+} </dev/null >/dev/null >[2=1] &
+sleep 2
+ps | grep ' ethernetd$' || fail ethernetd
+tail -3 /sys/log/ether
+grep 4t /net/iproute
+ls -l /srv/ethernetd
+echo SERVER-DONE

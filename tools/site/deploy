@@ -4,34 +4,46 @@
 # ISO at /iso/ and the machine's page at /plan9-wasm32/, from tools/dist's
 # build/dist, onto the cloud server over the administrators' WireGuard
 # tunnel (Plan2001's tools/cloud/wg-admin up, with sudo) by tools/site/site.rc
-# there, through Plan2001's 9pterm and its admin password.  With the machine,
-# the site's network's programs (aux/ethernetd, aux/etherws: built there for
-# its objtype) and the auth page (docs/network.md); -n: the machine's
-# plan9.ini says netauth= (once the server has the auth host and its routes,
-# docs/plan2001-server.md)
-#   tools/site/deploy [-p] [-n] [ADMIN-IP]	-p the front page alone; default 10.201.0.1; PLAN2001=~/Plan2001
+# there, through Plan2001's 9pterm and its admin password; then the server's
+# own configuration for it, tools/site/server.rc (the network's programs
+# built there, the auth page, rc-httpd, the certificate, cpustart:
+# docs/plan2001-server.md).  -n: the machine's plan9.ini says netauth=
+# (docs/network.md).  -s: server.rc alone
+#   tools/site/deploy [-p | -s] [-n] [ADMIN-IP]	-p the front page alone; default 10.201.0.1; PLAN2001=~/Plan2001
 set -e
 here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
 live=/mnt/term$root/build/dist/live iso=/mnt/term$root/build/dist/plan9-wasm32.iso
-src=/mnt/term$root net=0
-[ "${1:-}" != -p ] || { live=- iso=- src=-; shift; }
+net=0 site=1 server=1
+[ "${1:-}" != -p ] || { live=- iso=- server=; shift; }
+[ "${1:-}" != -s ] || { site=; shift; }
 [ "${1:-}" != -n ] || { net=1; shift; }
 admin=${1:-10.201.0.1}
 p2001=${PLAN2001:-$HOME/Plan2001}
 sec=${PLAN2001_CACHE:-$HOME/.cache/plan2001}/cloud
 T=$p2001/monolith/build/9pterm/9pterm
 d=$root/build/dist
-[ -s "$d/plan9-wasm32.iso" ] || { echo "deploy: no build/dist (PLAN9=... tools/dist)" >&2; exit 1; }
+[ -z "$site" ] || [ -s "$d/plan9-wasm32.iso" ] || { echo "deploy: no build/dist (PLAN9=... tools/dist)" >&2; exit 1; }
 [ -x "$T" ] || { echo "deploy: no $T (Plan2001's monolith/tools/build)" >&2; exit 1; }
 ping -c1 -W3 "$admin" >/dev/null 2>&1 || { echo "deploy: $admin does not answer: the tunnel ($p2001/tools/cloud/wg-admin up)" >&2; exit 1; }
 # the front page with the ISO's size and the tree it is
 s=$root/build/site
-rm -rf "$s"; mkdir -p "$s"
-size=$(( $(stat -c %s "$d/plan9-wasm32.iso") / 1048576 ))
-v="tree $(git -C "$root" rev-parse --short tree) · $(date -u +%Y-%m-%d)"
-sed "s|@ISO@|plan9-wasm32.iso, $size MB|; s|@VERSION@|$v|" "$here/index.html" >"$s/index.html"
-out=$("$T" -h "$admin" -a "tcp!$admin!567" -u admin -P "$sec/admin.pass" -W 20 -T "${TMO:-7200}" \
-	-c "rc /mnt/term$here/site.rc /mnt/term$s/index.html $live $iso $src $net" 2>&1 || true)
-echo "$out"
-echo "$out" | grep -q SITE-DONE || { echo "deploy: not installed" >&2; exit 1; }
+if [ -n "$site" ]; then
+	rm -rf "$s"; mkdir -p "$s"
+	size=$(( $(stat -c %s "$d/plan9-wasm32.iso") / 1048576 ))
+	v="tree $(git -C "$root" rev-parse --short tree) · $(date -u +%Y-%m-%d)"
+	sed "s|@ISO@|plan9-wasm32.iso, $size MB|; s|@VERSION@|$v|" "$here/index.html" >"$s/index.html"
+fi
+run() {	# a script there, as admin; its last line says it is done
+	out=$("$T" -h "$admin" -a "tcp!$admin!567" -u admin -P "$sec/admin.pass" -W 20 -T "${TMO:-7200}" -c "$1" 2>&1 || true)
+	echo "$out"
+	echo "$out" | grep -q "$2" || { echo "deploy: not installed" >&2; exit 1; }
+}
+[ -z "$site" ] || run "rc /mnt/term$here/site.rc /mnt/term$s/index.html $live $iso $net" SITE-DONE
+if [ -n "$server" ]; then
+	TMO=${TMO:-900} run "rc /mnt/term$here/server.rc /mnt/term$root" SERVER-DONE
+	# the tunnel answers with aux/ethernetd running: say so, before server.rc's switch stops it
+	sleep 5
+	ping -c3 -W3 "$admin" >/dev/null 2>&1 || { echo "deploy: the tunnel is down: ethernetd stops in 3 minutes" >&2; exit 1; }
+	TMO=60 run "touch /adm/ether/ok && echo TUNNEL-OK" TUNNEL-OK
+fi
 echo "deploy: https://plan2001.com/"

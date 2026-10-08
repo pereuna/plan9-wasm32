@@ -255,6 +255,7 @@ if [[ " $names " == *" ethergw "* ]]; then
 	oneline() { python3 -c 'import re,sys; s=sys.argv[1].strip(); s=re.sub(r"&[ \t]*\n\s*", "\x26 ", s); print(re.sub(r"[ \t]*\n\s*", "; ", s))' "$1"; }
 	waitlog() { echo "x=(); n=(); while(~ \$#x 0 && ! ~ \$#n $2){ sleep 1; n=(\$n 1); x=\`{sed -n '/$1/=' /tmp/ether.log} }"; }
 	srv="ramfs; ip/ipconfig; ndb/cs; sed -n 's/^ip=([^ ]+).*/server \1/p' /net/ndb; mkdir -p /tmp/ether/cred
+	echo add 0.0.0.0 0.0.0.0 10.0.2.2 4t 0 100.64.0.0 255.255.255.0 >/net/iproute
 	aux/ethernetd -l -v -r localhost -o $A -d /tmp/ether -D 198.51.100.1 -m 2 -i 20 >[2=1] | while(l=\`{read}) { echo ethernetd: \$l; echo \$l >>/tmp/ether.log } &
 	sleep 1; aux/listen1 -t tcp!*!17092 aux/etherws -A $A -E $M &
 	$(waitlog 'no invitations' 300)
@@ -286,9 +287,10 @@ if [[ " $names " == *" ethergw "* ]]; then
 	"$here/etherclient" 18096 $A $M localhost 10.0.2.15 quit
 	wait $apid || failed="$failed ethergwsrv"
 	tail -1 "$root/build/test/ethergwsrv.out"
-	# A's log: what went out (TCP to 443, B's enrolling), what did not (25, the server, a forged source)
+	# A's log: what went out (TCP to 443, B's enrolling), what did not (25, the server, a forged source);
+	# the source-specific route an older ethernetd made (it cut a WireGuard tunnel), removed
 	g="$root/build/test/ethergwsrv.txt"
-	if grep -q 'tcp 198.51.100.1!443' "$g" && grep -q 'enroll dave' "$g" && grep -q 'dave up as 100.64.0.' "$g" && ! grep -q -e '!25$' -e 'tcp 10.0.2.15' -e '100.64.0.99' "$g"; then
+	if grep -q 'tcp 198.51.100.1!443' "$g" && grep -q 'enroll dave' "$g" && grep -q 'dave up as 100.64.0.' "$g" && grep -q 'an old route removed' "$g" && ! grep -q -e '!25$' -e 'tcp 10.0.2.15' -e '100.64.0.99' "$g"; then
 		echo "PASS: ethergwsrv: its log"
 	else
 		echo "FAIL: ethergwsrv: its log ($g)"; failed="$failed ethergwlog"

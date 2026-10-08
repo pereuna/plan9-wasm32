@@ -330,6 +330,7 @@ main(int argc, char **argv)
 	*e = 0;
 	path = strdup(path);
 	*e = ' ';
+	kind = want = nil;
 	if(strcmp(path, "/auth") == 0){
 		kind = "auth";
 		want = authorigin;

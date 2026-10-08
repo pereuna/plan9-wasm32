@@ -75,8 +75,13 @@ the host owner's).
   frames must come from one MAC address and its packets from its own IP
   address.
 - **Out**: into the server's IP stack through a `pkt` interface, routed
-  out with the server's address: a source-specific default route with
-  9front's translation (`t`, NAT) for 100.64.0.0/24 only. Allowed: TCP to
+  out with the server's address: a default route with 9front's
+  translation (`t`, NAT), the default one's gateway and interface. The
+  stack translates only what it forwards, never the server's own packets;
+  and the route is not source specific: a lookup without a source (a
+  WireGuard tunnel's outer packets) takes a source-specific route's source
+  range, and one for 100.64.0.0/24 cut the administrators' tunnel
+  (2026-10-08). Allowed: TCP to
   ports 80, 443 and 9418, DNS to the resolvers (9.9.9.9), ICMP echo. Not:
   the server's own addresses, private, shared, link-local (the cloud's
   metadata, 169.254.169.254), multicast and reserved networks, fragments,
