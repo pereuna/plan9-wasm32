@@ -1284,7 +1284,10 @@ export async function boot(url, front = {}) {
 	 * (and one shorter than its header or longer than ETHERMAXTU, 1514);
 	 * what goes out is dropped while the WebSocket is not open or holds
 	 * more than ETHERQ.  link is 1 while it is open; closed, it is opened
-	 * again, a second later, then longer each time up to a minute
+	 * again, a second later, then longer each time up to a minute.  A site's
+	 * network (docs/network.md, front.ticket): its first word is the ticket,
+	 * the link up at the gateway's ok; its "ticket T" renews it, its error
+	 * about it drops it - no ticket, no WebSocket, the link down
 	 */
 	const NERING = 256*1024, ETHERQ = 1024*1024;	/* a power of 2: the counters run modulo 2^32, the index masked */
 	const ether = { ring: 0, ws: null, wait: 1000 };
@@ -1302,6 +1305,8 @@ export async function boot(url, front = {}) {
 	};
 	ether.connect = () => {
 		if (!front.ws || /\/\/0\.0\.0\.0:0$/.test(front.ws)) return;	/* no gateway: the link stays down */
+		const ticket = front.ticket ? front.ticket.get() : null;
+		if (front.ticket && !ticket) return;
 		let ws;
 		try {
 			ws = new WebSocket(front.ws + '/ether');
@@ -1310,7 +1315,11 @@ export async function boot(url, front = {}) {
 		}
 		ws.binaryType = 'arraybuffer';
 		ether.ws = ws;
-		ws.onopen = () => { ether.wait = 1000; ether.word(8, 1); };
+		ws.onopen = () => {
+			ether.wait = 1000;
+			if (ticket) ws.send('ticket ' + ticket);
+			else ether.word(8, 1);
+		};
 		ws.onclose = () => {
 			if (ether.ws !== ws) return;
 			ether.ws = null;
@@ -1318,7 +1327,16 @@ export async function boot(url, front = {}) {
 			setTimeout(ether.connect, ether.wait);
 			ether.wait = Math.min(ether.wait * 2, 60000);
 		};
-		ws.onmessage = (e) => { if (typeof e.data !== 'string') ether.put(new Uint8Array(e.data)); };
+		ws.onmessage = (e) => {
+			if (typeof e.data !== 'string') { ether.put(new Uint8Array(e.data)); return; }
+			const [w, a] = e.data.split(' ');
+			if (w === 'ok') ether.word(8, 1);
+			else if (w === 'ticket' && a) front.ticket?.set(a);
+			else if (w === 'error') {
+				console.log('ether: the gateway: ' + e.data);
+				if (/ticket/.test(e.data)) front.ticket?.drop();
+			}
+		};
 	};
 	ether.start = (ring) => { ether.ring = ring; ether.connect(); };
 	ether.send = (b) => {

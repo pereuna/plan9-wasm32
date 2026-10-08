@@ -1,6 +1,7 @@
 # the tests' boot file system: bootfs.proto's and these (tools/test/run;
 # tools/bootfs takes both): the test programs as mk makes them here,
-# 9front's clock and ip/ping, and the tests' /lib/ndb/local
+# 9front's clock, ip/ping, aux/listen1 and aux/dial, the network's gateway
+# (aux/ethernetd, aux/etherws: tools/test/run ethergw), and the tests' /lib/ndb/local
 bin
 	c3a	- sys sys /sys/src/9/wasm32/test/3.c3a
 	c3b	- sys sys /sys/src/9/wasm32/test/3.c3b
@@ -21,6 +22,11 @@ bin
 	clock	- sys sys /wasm32/bin/clock
 	ip
 		ping	- sys sys /wasm32/bin/ip/ping
+	aux
+		ethernetd	- sys sys /wasm32/bin/aux/ethernetd
+		etherws	- sys sys /wasm32/bin/aux/etherws
+		listen1	- sys sys /wasm32/bin/aux/listen1
+		dial	- sys sys /wasm32/bin/aux/dial
 	rcif.rc	- sys sys /sys/src/9/wasm32/test/rcif.rc
 lib
 	ndb
