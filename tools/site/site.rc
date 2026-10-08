@@ -42,7 +42,7 @@ for(f in $live/*){
 	}
 }
 rm -f $d/plan9-wasm32.iso $d/plan9-wasm32.iso.gz $d/plan9.ini.gz
-{echo cdboot=yes; echo iso=file} >$d/plan9.ini
+{echo 'cdboot=yes'; echo 'iso=file'} >$d/plan9.ini
 
 step the front page
 if(test -f $web/index.html && ! test -f $web/plan2001.html)
