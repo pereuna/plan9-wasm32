@@ -10,7 +10,8 @@
 #   - rc-httpd's select-handler: by host - auth.plan2001.com its page and
 #     GET /auth, plan2001.com the site and GET /ether, both the WebSockets
 #     of aux/etherws; HSTS, nosniff, the auth page's CSP
-#   - tcp443: the connection's directory for etherws's log ($net)
+#   - tcp443: the connection's directory for etherws's log ($net), the
+#     requests' log in /sys/log/www
 #   - the certificate: one for plan2001.com and auth.plan2001.com
 #     (acmechallenge maps NAME.plan2001.com to NAME.cpu.plan2001.com's
 #     challenge, the zone this server answers for; certrenew renews it)
@@ -19,8 +20,9 @@
 #   - off: webterm (17080), the development https (17443), distd (17050),
 #     signupd (17040), passkeyd (17041), the apps' names in the zone,
 #     Plan2001's machine page (plan2001.html)
-#   - aux/ethernetd (re)started; stopped again in 3 minutes, its route
-#     removed, unless deploy confirms its tunnel still answers
+#   - aux/ethernetd (re)started if it is not running or has changed;
+#     stopped again in 3 minutes, its route removed, unless deploy
+#     confirms its tunnel still answers
 rfork e
 src=$1
 fn fail { echo SERVER FAILED: $*; exit $1 }
@@ -41,6 +43,7 @@ mkdir -p $bk || fail $bk
 echo backup: $bk
 
 step the gateway: aux/ethernetd, aux/etherws
+old=`{sha1sum /$objtype/bin/aux/ethernetd >[2]/dev/null}
 b=/tmp/ethergw.build
 rm -rf $b
 mkdir -p $b
@@ -97,14 +100,16 @@ cat >/rc/bin/service/tcp443 <<'X'
 # tools/site/server.rc): rc-httpd and its select-handler, with the Let's
 # Encrypt certificate for both (certrenew), else *.cpu.plan2001.com's,
 # else the development one; $net the connection's directory (etherws's
-# log has the browser's address from it)
+# log has the browser's address from it); the requests' log in
+# /sys/log/www, not on the console
 crt=/sys/lib/tls/acmed/plan2001.com.crt
 test -s $crt || crt=/sys/lib/tls/acmed/cpu.plan2001.com.crt
 test -s $crt || crt=/sys/lib/tls/monolith.pem
 ~ $#3 0 || net=$3
-web=/sys/lib/plan2001/web exec tlssrv -c $crt /rc/bin/rc-httpd/rc-httpd
+web=/sys/lib/plan2001/web exec tlssrv -c $crt /rc/bin/rc-httpd/rc-httpd >>[2]/sys/log/www
 X
 chmod 775 /rc/bin/service/tcp443
+test -e /sys/log/www || { touch /sys/log/www && chmod 666 /sys/log/www }
 
 step the certificate: acmechallenge, plan2001.com.csr
 save /rc/bin/acmechallenge $tls/acmed/plan2001.com.csr $tls/acmed/plan2001.com.crt
@@ -193,6 +198,13 @@ if(! cmp -s /tmp/ndb /lib/ndb/local){
 step aux/ethernetd
 mkdir -p /adm/ether/cred && chmod 700 /adm/ether
 test -e /sys/log/ether || { touch /sys/log/ether && chmod 666 /sys/log/ether }
+# running already, the same program: left as it is (its tickets are in its memory)
+if(ps | grep -s ' ethernetd$' && ~ $old(1) `{sha1sum /$objtype/bin/aux/ethernetd}){
+	echo running, unchanged
+	ls -l /srv/ethernetd
+	echo SERVER-DONE
+	exit
+}
 if(ps | grep -s ' ethernetd$')
 	kill ethernetd | rc	# the new one
 sleep 1
