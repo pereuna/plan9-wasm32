@@ -1,0 +1,59 @@
+#!/bin/bash
+# The site's network's invitations (docs/network.md): a code for NAME,
+# added to the server's /adm/ether/invites over the administrators'
+# tunnel (as tools/site/deploy), and printed - the person makes a passkey
+# with it on https://auth.plan2001.com/ (the machine's "Connect the
+# network"), once; NAME is theirs in the gateway's log and limits.
+#   tools/site/invite NAME...	a code for each
+#   tools/site/invite -l		the codes not used yet, the passkeys made
+#   tools/site/invite -r NAME	NAME's passkeys removed (its tickets end within the hour)
+set -e
+admin=${ADMIN:-10.201.0.1}
+p2001=${PLAN2001:-$HOME/Plan2001}
+sec=${PLAN2001_CACHE:-$HOME/.cache/plan2001}/cloud
+T=$p2001/monolith/build/9pterm/9pterm
+[ -x "$T" ] || { echo "invite: no $T (Plan2001's monolith/tools/build)" >&2; exit 1; }
+ping -c1 -W3 "$admin" >/dev/null 2>&1 || { echo "invite: $admin does not answer: the tunnel ($p2001/tools/cloud/wg-admin up)" >&2; exit 1; }
+
+# an rc script (stdin) there, as admin: a file of this machine's through
+# /mnt/term (9pterm -c's quotes do not survive), private, then removed
+there() {
+	local d r
+	d=$(mktemp -d); chmod 700 "$d"
+	cat >"$d/invite.rc"
+	"$T" -h "$admin" -a "tcp!$admin!567" -u admin -P "$sec/admin.pass" -W 20 -T 60 -c "rc /mnt/term$d/invite.rc" && r=0 || r=$?
+	rm -rf "$d"
+	return $r
+}
+name() { [[ $1 =~ ^[a-z][a-z0-9]{0,27}$ ]] || { echo "invite: $1: a name is a-z, then a-z or 0-9, 28 at most" >&2; exit 1; }; }
+
+if [ "${1:-}" = -l ]; then
+	there <<'X'
+echo invitations not used:
+awk '{print "  " $2}' /adm/ether/invites
+echo passkeys:
+for(f in /adm/ether/cred/*)
+	if(test -f $f)
+		awk '$1 == "name" {n = $2} $1 == "created" {c = $2} END {print "  " n, c}' $f
+X
+elif [ "${1:-}" = -r ]; then
+	name "${2:-}"
+	{ echo "n=$2"; cat <<'X'
+for(f in /adm/ether/cred/*)
+	if(test -f $f && grep -s '^name	'^$n^'$' $f){
+		rm $f && echo removed: $f
+	}
+status=''
+X
+	} | there
+elif [ $# -gt 0 ]; then
+	for n; do name "$n"; done
+	for n; do
+		code=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')
+		out=$(echo "echo $code $n >>/adm/ether/invites && chmod 600 /adm/ether/invites && echo ADDED" | there 2>&1)
+		echo "$out" | grep -q ADDED || { echo "invite: $n: not added: $out" >&2; exit 1; }
+		echo "$n $code"
+	done
+else
+	echo "usage: tools/site/invite NAME... | -l | -r NAME" >&2; exit 1
+fi

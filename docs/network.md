@@ -94,15 +94,17 @@ the host owner's).
 
 ## Invitations
 
-On the server (the host owner):
+From the administrator's computer, over the tunnel:
 
-    code=`{dd -if /dev/random -bs 16 -count 1 >[2]/dev/null | xd -x | sed 1q | sed 's/^[0-9a-f]+ //; s/ //g'}
-    echo $code alice >>/adm/ether/invites
-    echo $code
+    tools/site/invite alice bob    # a code for each, printed: "alice CODE"
+    tools/site/invite -l           # the codes not used yet, the passkeys made
+    tools/site/invite -r alice     # alice's passkeys removed
 
-The code goes to the person; the name is theirs in the log and limits.
-To take a person's access away: remove their `/adm/ether/cred/ID` files
-(their tickets end within the hour).
+The code goes to the person, who uses it once on the auth page (the
+machine's "Connect the network", then "Make the passkey"); the name is
+theirs in the gateway's log and limits. Removing a person's passkeys takes
+their access away: their tickets end within the hour. On the server
+itself an invitation is a line of `/adm/ether/invites`, `CODE NAME`.
 
 ## Tests
 
