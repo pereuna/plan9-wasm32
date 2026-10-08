@@ -72,3 +72,5 @@ A new test is a program or an rc line in `tools/test/run` and its
 expected output; the output's first line is `ticks in it: ok` with a
 `\r\n` (the kernel's console), the others end in `\n`.
 
+Plan 9 is a trademark of the Plan 9 Foundation; this project is not
+affiliated with it.
