@@ -181,8 +181,8 @@ document.addEventListener('paste', (e) => {
  * is none.  The URL's ?boot= and ?iso= win, for one boot
  */
 const bios = (() => { try { return JSON.parse(localStorage.getItem('plan9-wasm32 bios') ?? '{}') ?? {}; } catch (e) { return {}; } })();
-const boot = q.get('boot') ?? (bios.disk === false || (bios.order ?? [])[0] === 'cd' && bios.cd !== false ? 'net' : null);
-const usedisk = q.get('disk') !== '0' && (boot === 'disk' || boot !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
+const bootdev = q.get('boot') ?? (bios.disk === false || (bios.order ?? [])[0] === 'cd' && bios.cd !== false ? 'net' : null);
+const usedisk = q.get('disk') !== '0' && (bootdev === 'disk' || bootdev !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
 const fromdisk = usedisk ? await diskboot().catch(() => null) : null;
 /*
  * the loader: a disk whose boot FAT has its own firmware (index.html and platform.js, the

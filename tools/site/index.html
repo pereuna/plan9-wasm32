@@ -13,12 +13,13 @@
 	html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
 	body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px;
 		font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 16px; box-sizing: border-box; }
-	main { display: flex; gap: clamp(32px, 10vw, 120px); align-items: flex-start; justify-content: center; flex-wrap: wrap; }
-	a { color: inherit; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 14px;
+	main { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(16px, 5vw, 48px) clamp(24px, 8vw, 96px); justify-items: center; align-items: start; }
+	a { color: inherit; }
+	main a { text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 14px;
 		border-radius: 24px; padding: 12px; outline-offset: 6px; }
-	a svg { width: clamp(120px, 28vw, 200px); height: auto; transition: transform .15s ease; }
-	a:hover svg, a:focus-visible svg { transform: scale(1.04); }
-	a:active svg { transform: scale(.97); }
+	main a svg { width: clamp(96px, 26vw, 160px); height: auto; transition: transform .15s ease; }
+	main a:hover svg, main a:focus-visible svg { transform: scale(1.04); }
+	main a:active svg { transform: scale(.97); }
 	.label { font-weight: 600; letter-spacing: .02em; }
 	.sub { color: var(--dim); font-size: 13px; margin-top: -10px; text-align: center; max-width: 18em; }
 	.v { white-space: nowrap; }
@@ -26,7 +27,10 @@
 	footer a { display: inline; padding: 0; text-decoration: underline; }
 	footer p { margin: 0 0 10px; }
 	footer code { font: 12px ui-monospace, monospace; white-space: nowrap; }
-	#bios { cursor: pointer; }
+	#bios, #help { cursor: pointer; }
+	dialog ol { margin: 0 0 14px; padding-left: 1.3em; }
+	dialog li { margin: 6px 0; }
+	dialog code { font: 13px ui-monospace, monospace; white-space: nowrap; }
 	dialog { border: 3px solid var(--ring); border-radius: 18px; background: var(--face); color: var(--fg); padding: 22px 26px; max-width: 26em; }
 	dialog::backdrop { background: rgb(0 0 0 / .35); }
 	dialog h2 { margin: 0 0 14px; font-size: 18px; }
@@ -85,7 +89,31 @@
 		<span class="label">BIOS</span>
 		<span class="sub">the boot order and devices</span>
 	</a>
+	<a id="help" href="#help" title="How to install">
+		<svg viewBox="0 0 200 200" aria-hidden="true">
+			<circle cx="100" cy="100" r="88" fill="var(--face)" stroke="var(--ring)" stroke-width="4"/>
+			<path d="M72 78 A28 28 0 1 1 112 103 Q100 110 100 124 V130" fill="none" stroke="var(--ring)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+			<circle cx="100" cy="156" r="8" fill="var(--ring)"/>
+		</svg>
+		<span class="label">Help</span>
+		<span class="sub">how to install</span>
+	</a>
 </main>
+<dialog id="howto">
+	<form method="dialog">
+		<h2>Installing</h2>
+		<ol>
+			<li><b>Download the ISO</b> (the CD), once.</li>
+			<li><b>Power on</b>: the browser's disk is empty, so the machine asks for the CD - choose the ISO.</li>
+			<li>In rio: <code>inst/start</code>. The install is <a href="https://fqa.9front.org/fqa4.html">9front's</a>,
+			except that copydist copies the base system, the tools and the source with its git, not the whole
+			system built. Its reboot boots the installed system from the disk.</li>
+			<li>Build the rest on the machine: <code>bind -ac /dist/9front /; cd /sys/src; mk install</code></li>
+		</ol>
+		<p class="note">To install anew: BIOS, "Boot once from CD".</p>
+		<div class="buttons"><button value="close" class="main">Close</button></div>
+	</form>
+</dialog>
 <dialog id="setup">
 	<form method="dialog">
 		<h2>BIOS setup</h2>
@@ -126,13 +154,13 @@
 		} else if (d.returnValue === 'once')
 			location.href = '/plan9-wasm32/?boot=net&iso=file';
 	});
+	const howto = document.getElementById('howto');
+	document.getElementById('help').addEventListener('click', (e) => { e.preventDefault(); howto.showModal(); });
 	if (location.hash === '#bios') document.getElementById('bios').click();
+	if (location.hash === '#help') howto.showModal();
 </script>
 <footer>
 	<p>9front for the wasm32 architecture: the web browser is the machine.</p>
-	<p>The install is <a href="https://fqa.9front.org/fqa4.html">9front's</a> (inst/start), except that
-	copydist copies the base system, the tools and the source with its git, not the whole system built:
-	the rest is the machine's to build &mdash; <code>bind -ac /dist/9front /; cd /sys/src; mk install</code></p>
 	<p><a href="https://github.com/pereuna/plan9-wasm32">Source</a> · <span class="v">@VERSION@</span><br>
 	Plan 9 is a trademark of the Plan 9 Foundation; this project is not affiliated with it.</p>
 </footer>
