@@ -199,18 +199,22 @@ sleep 1
 # a dead man's switch: unless deploy says, in 3 minutes, that its tunnel
 # still answers (/adm/ether/ok), ethernetd goes and its route with it - the
 # administrators' only way in is that tunnel (2026-10-08: a route of an
-# earlier ethernetd cut it)
+# earlier ethernetd cut it).  Both in a namespace of their own (as at boot,
+# not this session's, which has /mnt/term: it would not end while they ran)
 rm -f /adm/ether/ok
-@{rfork s; aux/ethernetd -r auth.plan2001.com -o https://auth.plan2001.com </dev/null >/dev/null >[2=1] &}
-@{
-	rfork s
-	sleep 180
-	if(! test -e /adm/ether/ok){
-		kill ethernetd | rc
-		grep '^0\.0\.0\.0 .* 4t ' /net/iproute | awk '{print "del", $1, $2, $3, $4, $6, $7, $8}' >/net/iproute
-		echo `{date} ethernetd stopped: the tunnel was not confirmed >>/sys/log/ether
-	}
-} </dev/null >/dev/null >[2=1] &
+cat >/sys/lib/plan2001/etherswitch <<'X'
+#!/bin/rc
+# tools/site/server.rc's dead man's switch for aux/ethernetd
+sleep 180
+if(! test -e /adm/ether/ok){
+	kill ethernetd | rc
+	grep '^0\.0\.0\.0 .* 4t ' /net/iproute | awk '{print "del", $1, $2, $3, $4, $6, $7, $8}' >/net/iproute
+	echo `{date} ethernetd stopped: the tunnel was not confirmed >>/sys/log/ether
+}
+X
+chmod 755 /sys/lib/plan2001/etherswitch
+@{rfork s; auth/newns /bin/aux/ethernetd -r auth.plan2001.com -o https://auth.plan2001.com </dev/null >/dev/null >[2=1] &}
+@{rfork s; auth/newns /bin/rc /sys/lib/plan2001/etherswitch </dev/null >/dev/null >[2=1] &}
 sleep 2
 ps | grep ' ethernetd$' || fail ethernetd
 tail -3 /sys/log/ether
