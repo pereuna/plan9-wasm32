@@ -174,12 +174,6 @@ def main():
 		cdp = Cdp(t['webSocketDebuggerUrl'])
 		cdp.call('Page.enable')
 		cdp.call('Runtime.enable')
-		# ISOFILE=path: the page's file chooser (?iso=file) given that file, as a person chooses it
-		if os.environ.get('ISOFILE'):
-			wait(cdp, "document.getElementById('isopick') && document.getElementById('isopick').classList.contains('on')", 60, 'the ISO chooser')
-			doc = cdp.call('DOM.getDocument')
-			node = cdp.call('DOM.querySelector', nodeId=doc['root']['nodeId'], selector='#isopick input')
-			cdp.call('DOM.setFileInputFiles', files=[os.path.abspath(os.environ['ISOFILE'])], nodeId=node['nodeId'])
 		if os.environ.get('TOUCH'):	# TOUCH=1: a phone - a touch screen 400x700, the page loaded again as one
 			cdp.call('Emulation.setDeviceMetricsOverride', width=400, height=700, deviceScaleFactor=1, mobile=True)
 			cdp.call('Emulation.setTouchEmulationEnabled', enabled=True, maxTouchPoints=5)
@@ -213,6 +207,13 @@ def main():
 			else:
 				cdp.call('Runtime.evaluate', expression=f'document.querySelector({sel}).click()', userGesture=True)
 			time.sleep(0.5)
+		# ISOFILE=path: the page's file chooser (?iso=file) given that file, as a person chooses it
+		# (after STEPS: the firmware asks for the network first)
+		if os.environ.get('ISOFILE'):
+			wait(cdp, "document.getElementById('isopick') && document.getElementById('isopick').classList.contains('on')", 120, 'the ISO chooser')
+			doc = cdp.call('DOM.getDocument')
+			node = cdp.call('DOM.querySelector', nodeId=doc['root']['nodeId'], selector='#isopick input')
+			cdp.call('DOM.setFileInputFiles', files=[os.path.abspath(os.environ['ISOFILE'])], nodeId=node['nodeId'])
 		def passkeys():
 			"""the next button the page shows, clicked"""
 			if not webauthn:
