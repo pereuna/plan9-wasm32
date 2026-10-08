@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""The network test's other ends (tools/test/run ethergw), in tools/gateway -n's
+namespace or on the host:
+  netpeer hello ADDR PORT...      TCP servers that say "hello PORT" and close:
+                                  the internet the machines reach (or may not)
+  netpeer relay LISTEN CONNECT    each connection to LISTEN relayed to CONNECT;
+                                  each tcp:HOST:PORT or unix:PATH (the host and
+                                  the namespace share the file system, not the
+                                  network)
+Several in one: netpeer hello ... -- relay ... -- relay ...
+"""
+import asyncio, os, sys
+
+async def hello(addr, ports):
+	async def say(r, w, p):
+		w.write(f'hello {p}\n'.encode())
+		await w.drain()
+		w.close()
+	for p in ports:
+		await asyncio.start_server(lambda r, w, p=p: say(r, w, p), addr, int(p))
+
+async def endpoint(spec, listen=None):
+	kind, _, rest = spec.partition(':')
+	if kind == 'tcp':
+		host, _, port = rest.rpartition(':')
+		if listen:
+			return await asyncio.start_server(listen, host, int(port))
+		return await asyncio.open_connection(host, int(port))
+	if kind == 'unix':
+		if listen:
+			try:
+				os.unlink(rest)
+			except FileNotFoundError:
+				pass
+			return await asyncio.start_unix_server(listen, rest)
+		return await asyncio.open_unix_connection(rest)
+	raise SystemExit(f'netpeer: {spec}: tcp:HOST:PORT or unix:PATH')
+
+async def pipe(r, w):
+	try:
+		while (b := await r.read(65536)):
+			w.write(b)
+			await w.drain()
+	except Exception:
+		pass
+	finally:
+		w.close()
+
+async def relay(listen, connect):
+	async def one(r, w):
+		try:
+			r2, w2 = await endpoint(connect)
+		except OSError:
+			w.close()
+			return
+		await asyncio.gather(pipe(r, w2), pipe(r2, w), return_exceptions=True)
+	await endpoint(listen, one)
+
+async def main():
+	args, parts = sys.argv[1:], []
+	while args:
+		if '--' in args:
+			i = args.index('--')
+			parts.append(args[:i])
+			args = args[i+1:]
+		else:
+			parts.append(args)
+			args = []
+	for p in parts:
+		if p[0] == 'hello' and len(p) >= 3:
+			await hello(p[1], p[2:])
+		elif p[0] == 'relay' and len(p) == 3:
+			await relay(p[1], p[2])
+		else:
+			raise SystemExit(__doc__)
+	await asyncio.Event().wait()
+
+asyncio.run(main())

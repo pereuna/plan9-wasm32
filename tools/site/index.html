@@ -127,6 +127,11 @@
 			<label><input type="checkbox" name="disk"> Disk (this browser's)</label>
 			<label><input type="checkbox" name="cd"> CD (the ISO you downloaded)</label>
 		</fieldset>
+		<fieldset>
+			<legend>Network</legend>
+			<label><input type="radio" name="net" value="ask"> Ask at boot (a passkey)</label>
+			<label><input type="radio" name="net" value="off"> Off</label>
+		</fieldset>
 		<p class="note">Kept in this browser. "Boot once from CD" installs anew without changing them: the
 		installer's reboot boots as they say.</p>
 		<div class="buttons">
@@ -146,11 +151,12 @@
 		f.order.value = (b.order ?? ['disk', 'cd']).join(',');
 		f.disk.checked = b.disk !== false;
 		f.cd.checked = b.cd !== false;
+		f.net.value = b.net === 'off' ? 'off' : 'ask';
 		d.showModal();
 	});
 	d.addEventListener('close', () => {
 		if (d.returnValue === 'save') {
-			try { localStorage.setItem(key, JSON.stringify({ order: f.order.value.split(','), disk: f.disk.checked, cd: f.cd.checked })); } catch (e) {}
+			try { localStorage.setItem(key, JSON.stringify({ order: f.order.value.split(','), disk: f.disk.checked, cd: f.cd.checked, net: f.net.value })); } catch (e) {}
 		} else if (d.returnValue === 'once')
 			location.href = '/plan9-wasm32/?boot=net&iso=file';
 	});

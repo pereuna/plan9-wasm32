@@ -32,6 +32,9 @@ build/test/site) with init's arguments, until the machine halts
   PROFILE=dir                              the browser's profile there, kept: its disk too
   ISOFILE=path                             the page's ?iso=file chooser given this file
   PLAN9INI='a=b'                           the page's plan9.ini
+  STEPS='[["#id"], ["#id", "text"], ...]'  the pages' elements, each once it is shown
+                                           (across pages: the BIOS's network, the
+                                           auth page): clicked, or given the text
 """
 import base64, json, os, re, shutil, socket, struct, subprocess, sys, tempfile, time, urllib.parse, urllib.request
 
@@ -201,6 +204,15 @@ def main():
 				cdp.call('WebAuthn.addVirtualAuthenticator', options={'protocol': 'ctap2', 'ctap2Version': 'ctap2_1',
 					'transport': 'usb', 'hasResidentKey': True, 'hasUserVerification': True,
 					'isUserVerified': True, 'hasPrf': not os.environ.get('WEBAUTHN_NOPRF'), 'automaticPresenceSimulation': True})
+		# STEPS: the pages' elements as a person uses them, each once it is there and shown
+		for st in json.loads(os.environ.get('STEPS', '[]')):
+			sel = json.dumps(st[0])
+			wait(cdp, f"(() => {{ const e = document.querySelector({sel}); return !!e && !e.disabled && e.offsetParent !== null; }})()", 60, st[0])
+			if len(st) > 1:
+				cdp.js(f"document.querySelector({sel}).value = {json.dumps(st[1])}")
+			else:
+				cdp.call('Runtime.evaluate', expression=f'document.querySelector({sel}).click()', userGesture=True)
+			time.sleep(0.5)
 		def passkeys():
 			"""the next button the page shows, clicked"""
 			if not webauthn:

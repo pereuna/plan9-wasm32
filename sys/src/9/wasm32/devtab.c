@@ -48,6 +48,7 @@ bootlinks(void)
 extern void ethermediumlink(void);
 extern void loopbackmediumlink(void);
 extern void netdevmediumlink(void);
+extern void pktmediumlink(void);
 extern void etherwasm32link(void);
 
 void
@@ -57,6 +58,7 @@ links(void)
 	ethermediumlink();
 	loopbackmediumlink();
 	netdevmediumlink();
+	pktmediumlink();
 	etherwasm32link();
 }
 

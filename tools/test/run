@@ -230,6 +230,71 @@ if [[ " $names " == *" dist "* ]]; then
 		echo "test: dist: skipped (no build/dist: PLAN9=... tools/dist)"
 	fi
 fi
+# the site's network (docs/network.md): aux/ethernetd and aux/etherws on a machine (A, 10.0.2.15 on
+# tools/gateway -n's network; beyond its gateway 10.0.2.2, the internet: tools/test/netpeer's hello on
+# 198.51.100.1, ports 80, 443 and 25 - out through A's default route and its NAT), reached from the
+# host through netpeer's relays (18096 -> a UNIX socket -> 10.0.2.15!17092).  tools/test/etherclient checks it as a page and a machine would, a passkey in
+# software: the origins, invitations, assertions, DHCP, ARP, ping, the NAT, the filter, the limits.
+# Then a machine (B) as a person has it: the BIOS's "Connect the network", the auth page (localhost,
+# another origin), an invitation and a passkey (Chromium's virtual authenticator), back with the
+# ticket: its link up, DHCP from the gateway, TCP out to 443, not to 25.  A's log at the end: what
+# went out, what did not.  Only when named
+if [[ " $names " == *" ethergw "* ]]; then
+	for p in 18094 18095 18096; do
+		if (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null; then echo "test: port $p is taken" >&2; exit 1; fi
+	done
+	cp "$root/tools/site/auth.html" "$site/auth.html"
+	sock=$root/build/test/ethergw.sock
+	"$root/tools/gateway" -p 18099 -n -- sh -c 'ip link set lo up && ip addr add 198.51.100.1/32 dev lo && exec "$0" hello 198.51.100.1 80 443 25 -- relay "unix:$1" tcp:10.0.2.15:17092' "$here/netpeer" "$sock" >"$root/build/test/gateway.log" 2>&1 &
+	gwpid=$!
+	"$here/netpeer" relay tcp:127.0.0.1:18096 "unix:$sock" &
+	rlpid=$!
+	trap 'kill $gwpid $rlpid 2>/dev/null' EXIT
+	A="http://localhost:18094" M="http://127.0.0.1:18094"
+	# a script's lines as one (init's arguments have no newlines): after & a blank, else ;
+	oneline() { python3 -c 'import re,sys; s=sys.argv[1].strip(); s=re.sub(r"&[ \t]*\n\s*", "\x26 ", s); print(re.sub(r"[ \t]*\n\s*", "; ", s))' "$1"; }
+	waitlog() { echo "x=(); n=(); while(~ \$#x 0 && ! ~ \$#n $2){ sleep 1; n=(\$n 1); x=\`{sed -n '/$1/=' /tmp/ether.log} }"; }
+	srv="ramfs; ip/ipconfig; ndb/cs; sed -n 's/^ip=([^ ]+).*/server \1/p' /net/ndb; mkdir -p /tmp/ether/cred
+	aux/ethernetd -l -v -r localhost -o $A -d /tmp/ether -D 198.51.100.1 -m 2 -i 20 >[2=1] | while(l=\`{read}) { echo ethernetd: \$l; echo \$l >>/tmp/ether.log } &
+	sleep 1; aux/listen1 -t tcp!*!17092 aux/etherws -A $A -E $M &
+	$(waitlog 'no invitations' 300)
+	{echo aliceinvitation0001 alice; echo bobinvitation000002 bob; echo carolinvitation0003 carol; echo daveinvitation00004 dave} >/tmp/ether/invites
+	$(waitlog quit-test 900)
+	sleep 1; echo done"
+	echo "test: ethergw (the server, A)"
+	MASKPIDS=1 HTTPPORT=18092 GATEWAY=18099 SERIAL=1 HALTWAIT=1200 ARGS="$(rcjson "$(oneline "$srv")")" "$here/wasmapp" ethergwsrv >"$root/build/test/ethergwsrv.out" 2>&1 &
+	apid=$!
+	# A listening: an answer through the relays
+	for i in $(seq 240); do
+		python3 -c 'import socket,sys; s=socket.create_connection(("127.0.0.1",18096),timeout=3); s.sendall(b"GET /x HTTP/1.1\r\n\r\n"); sys.exit(0 if s.recv(16).startswith(b"HTTP/1.1") else 1)' 2>/dev/null && break
+		sleep 1
+	done
+	echo "test: ethergw (the protocol, etherclient)"
+	"$here/etherclient" 18096 $A $M localhost 10.0.2.15 | tee "$root/build/test/etherclient.txt" | tail -1 || failed="$failed etherclient"
+	echo "test: ethergw (a machine, B)"
+	b="ramfs; for(i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15) if(! ~ \`{sed -n 's/^link: //p' /net/ether0/stats} 1) sleep 1
+	~ \`{sed -n 's/^link: //p' /net/ether0/stats} 1 && echo the link is up
+	ip/ipconfig; ndb/cs
+	~ \`{sed -n 's/^ip=(100\.64\.0\.)[0-9]+ .*/\1/p' /net/ndb} 100.64.0. && echo an address from the gateway
+	ip/ping -q -n 2 100.64.0.1 >/dev/null && echo the gateway answers
+	aux/dial tcp!198.51.100.1!443 rc -c 'cat >[1=2]'
+	aux/dial tcp!198.51.100.1!25 rc -c 'cat >[1=2]' >[2]/tmp/x & p=\$apid; sleep 4; echo kill >/proc/\$p/note
+	test -s /tmp/x || echo port 25 dropped
+	echo done"
+	HTTPPORT=18094 GATEWAY=18096 PLAN9INI="netauth=$A/auth.html" WEBAUTHN='[]' HALTWAIT=150 \
+		STEPS='[["#netconnect"], ["#invite", "daveinvitation00004"], ["#enroll"]]' run ethergw "$(rcjson "$(oneline "$b")")"
+	"$here/etherclient" 18096 $A $M localhost 10.0.2.15 quit
+	wait $apid || failed="$failed ethergwsrv"
+	tail -1 "$root/build/test/ethergwsrv.out"
+	# A's log: what went out (TCP to 443, B's enrolling), what did not (25, the server, a forged source)
+	g="$root/build/test/ethergwsrv.txt"
+	if grep -q 'tcp 198.51.100.1!443' "$g" && grep -q 'enroll dave' "$g" && grep -q 'dave up as 100.64.0.' "$g" && ! grep -q -e '!25$' -e 'tcp 10.0.2.15' -e '100.64.0.99' "$g"; then
+		echo "PASS: ethergwsrv: its log"
+	else
+		echo "FAIL: ethergwsrv: its log ($g)"; failed="$failed ethergwlog"
+	fi
+	kill $gwpid $rlpid 2>/dev/null; wait $gwpid $rlpid 2>/dev/null || true; trap - EXIT
+fi
 # no network (no gateway: the link down, no DHCP): no auth server, no tickets
 want dp9iknoas $names && GATEWAY=18098 HALTWAIT=120 run dp9iknoas "$(rcjson "ndb/cs; mntgen -s slashmnt /mnt; auth/factotum -n -sfactotum; echo 'key proto=dp9ik dom=cirno user=bootes !password=bpassword' >/mnt/factotum/ctl; echo 'key proto=dp9ik dom=cirno user=glenda !password=gpassword' >/mnt/factotum/ctl; d3 -p cirno; echo done")"
 [ -z "$failed" ] || { echo "test: failed:$failed"; exit 1; }

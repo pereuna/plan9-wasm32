@@ -1,19 +1,26 @@
 #!/bin/rc
 # The site's files on the cloud server (https://plan2001.com/), run as admin
 # by tools/site/deploy through 9pterm, this tree and what it made through
-# /mnt/term:  rc site.rc PAGE LIVE ISO   (LIVE and ISO -: the page alone)
+# /mnt/term:  rc site.rc PAGE LIVE ISO SRC NET   (LIVE, ISO and SRC -: the page alone)
 #   $web/index.html          the front page: the ISO and the power button
 #                            (Plan2001's own page kept as plan2001.html)
 #   $web/iso/plan9-wasm32.iso   the distribution, to download
 #   $web/plan9-wasm32/       the machine's page, kernel and boot file system;
 #                            plan9.ini cdboot=yes iso=file: the CD is the
-#                            person's own copy of the ISO
+#                            person's own copy of the ISO; NET 1: and
+#                            netauth=, the site's network's passkey page
+#   /amd64/bin/aux/ethernetd, etherws   the site's network (SRC's
+#                            sys/src/cmd/ethergw, built here; cpustart and
+#                            rc-httpd run them: docs/plan2001-server.md)
+#   /sys/lib/plan2001/auth/index.html   auth.plan2001.com's page
 # $web is tcp443's (rc-httpd: plan2001-static gives a directory's
 # index.html and FILE.gz to a browser that takes it)
 rfork e
 page=$1
 live=$2
 iso=$3
+src=$4
+net=$5
 fn fail { echo SITE FAILED: $*; exit $1 }
 fn step { echo '###' $* }
 fn put {	# FILE TARGET: whole, or not at all
@@ -45,8 +52,22 @@ for(f in $live/*){
 	}
 }
 rm -f $d/plan9-wasm32.iso $d/plan9-wasm32.iso.gz $d/plan9.ini.gz
-{echo 'cdboot=yes'; echo 'iso=file'} >$d/plan9.ini
+{echo 'cdboot=yes'; echo 'iso=file'; if(~ $net 1) echo 'netauth=https://auth.plan2001.com/'} >$d/plan9.ini
 chmod 664 $d/*
+}
+
+if(! ~ $src -){
+step the network: aux/ethernetd, aux/etherws, the auth page
+b=/tmp/ethergw.build
+rm -rf $b
+mkdir -p $b
+cp $src/sys/src/cmd/ethergw/* $b/ || fail ethergw source
+@{cd $b && mk install} || fail ethergw build
+rm -rf $b
+mkdir -p /sys/lib/plan2001/auth
+put $src/tools/site/auth.html /sys/lib/plan2001/auth/index.html
+chmod 664 /sys/lib/plan2001/auth/index.html
+ls -l /$objtype/bin/aux/ethernetd /$objtype/bin/aux/etherws
 }
 
 step the front page

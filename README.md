@@ -48,6 +48,10 @@ DHCP, TCP and the rest over it (`docs/kernel.md`):
     tools/gateway -n         # a network of its own, 10.0.2.0/24, DHCP, no way out (the tests)
     tools/gateway -t tap0    # a TAP made by root, bridged or NATed to the LAN
 
+On a public site the other end is the site's own gateway, `aux/ethernetd`:
+the web and git only, for a machine whose owner has shown a passkey on the
+site's auth page (docs/network.md).
+
 Try it: https://plan2001.com/plan9-wasm32/ (a live image, as 9front's ISO:
 `inst/start` installs onto the browser's disk; `?iso=file` reads a copy of
 the ISO on your own computer).

@@ -37,7 +37,9 @@ After the install, on the machine (as 9front's sysupdate):
     mk install                  # the rest of the system, built here
 
 and to update it, from this repository (the machine's network must
-reach GitHub: `tools/gateway`, passt's, as offline the page's own):
+reach GitHub: on plan2001.com the site's, with a passkey - the firmware
+asks at boot, docs/network.md; on one's own computer `tools/gateway`,
+passt's):
 
     bind -ac /dist/9front /
     cd / && git/pull            # origin: https://github.com/pereuna/plan9-wasm32, branch tree

@@ -26,6 +26,9 @@
 	#kbd { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; }
 	#isopick { display: none; position: fixed; inset: 0; padding: 32px 16px; background: var(--bg); color: var(--fg); }
 	#isopick.on { display: block; }
+	#netpick { display: none; position: fixed; inset: 0; padding: 32px 16px; background: var(--bg); color: var(--fg); }
+	#netpick.on { display: block; }
+	#netpick button { font: inherit; padding: 6px 14px; margin: 0 8px 8px 0; }
 	#halt { display: none; position: fixed; left: 0; right: 0; bottom: 0; padding: 8px 16px; background: var(--bg); }
 </style>
 </head>
@@ -35,6 +38,7 @@
 <pre id="eia0"></pre>
 <pre id="halt"></pre>
 <div id="isopick"><p>Insert the CD: choose the distribution's ISO image you downloaded (plan9-wasm32.iso). The machine reads it as its CD, sdW1, from this computer's disk; nothing is uploaded.</p><input type="file" accept=".iso,application/x-iso9660-image"><p><a href="?boot=disk&amp;iso=none">Boot without the CD</a> (from the disk, if it has a system)</p></div>
+<div id="netpick"><p>The network: this site's, for a machine whose owner has a passkey for it (and the first time, an invitation). Without it the machine boots as it is, the CD and the disk its own.</p><p><button id="netconnect">Connect the network</button><button id="netoffline">Without the network</button></p><p id="netcount"></p></div>
 <div id="bar"><button data-k="kbd">kbd</button><button data-b="1" class="on">m1</button><button data-b="2">m2</button><button data-b="4">m3</button><button data-k="Escape">esc</button><button data-k="Tab">tab</button><button data-k="ctrl">ctl</button><button data-k="Delete">del</button><button data-k="ArrowLeft">←</button><button data-k="ArrowUp">↑</button><button data-k="ArrowDown">↓</button><button data-k="ArrowRight">→</button></div>
 <textarea id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="keyboard"></textarea>
 <script type="module">
@@ -181,6 +185,47 @@ document.addEventListener('paste', (e) => {
  * is none.  The URL's ?boot= and ?iso= win, for one boot
  */
 const bios = (() => { try { return JSON.parse(localStorage.getItem('plan9-wasm32 bios') ?? '{}') ?? {}; } catch (e) { return {}; } })();
+/*
+ * the site's network (docs/network.md): plan9.ini's netauth=URL is its passkey's page, another
+ * origin's.  A machine without a ticket for it is asked at boot, before anything of its disk
+ * runs: Connect goes there (this page's URL kept for the way back), and the page there sends
+ * the tab back with #ticket=T, kept for the tab (sessionStorage: gone with it), the URL as it
+ * was; Without, or nothing in 10 seconds, it boots with the link down.  The BIOS's net: 'off'
+ * never asks.  Without netauth= (tools/serve: tools/gateway's) the gateway takes the card as
+ * it is.  The disk's own firmware (below) is given what was decided
+ */
+const TICKET = 'plan9-wasm32 ticket', BACK = 'plan9-wasm32 back';
+const ss = {
+	get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
+	set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} },
+	del: (k) => { try { sessionStorage.removeItem(k); } catch (e) {} },
+};
+const netauth = inival(ini, 'netauth');
+if (!window.plan9firmware && location.hash.startsWith('#ticket=')) {
+	ss.set(TICKET, location.hash.slice(8));
+	const back = ss.get(BACK), here = location.href.split('#')[0];
+	ss.del(BACK);
+	if (back && new URL(back).origin === location.origin && back !== here) {
+		location.replace(back);
+		await new Promise(() => {});
+	}
+	history.replaceState(null, '', here);
+}
+const net = window.plan9net ??= !netauth ? 'open' : (q.get('net') ?? bios.net) === 'off' ? 'off' : ss.get(TICKET) ? 'ticket' : await new Promise((done) => {
+	const d = document.getElementById('netpick'), count = document.getElementById('netcount');
+	let n = 10;
+	const tick = () => { count.textContent = 'Without the network in ' + n + ' s'; if (n-- === 0) off(); };
+	const t = setInterval(tick, 1000);
+	const off = () => { clearInterval(t); d.classList.remove('on'); done('off'); };
+	tick();
+	d.classList.add('on');
+	document.getElementById('netoffline').addEventListener('click', off);
+	document.getElementById('netconnect').addEventListener('click', () => {
+		clearInterval(t);
+		ss.set(BACK, location.href.split('#')[0]);
+		location.assign(new URL(netauth, location.href).href);
+	});
+});
 const bootdev = q.get('boot') ?? (bios.disk === false || (bios.order ?? [])[0] === 'cd' && bios.cd !== false ? 'net' : null);
 const usedisk = q.get('disk') !== '0' && (bootdev === 'disk' || bootdev !== 'net' && !q.has('noinit') && !q.getAll('arg').length);
 const fromdisk = usedisk ? await diskboot().catch(() => null) : null;
@@ -240,7 +285,7 @@ boot(fromdisk ? fromdisk.kernel : '9wasm32.wasm', {
 	/* the machine's disk (#S/sdW0): OPFS, ?disk=MB (4096: room for an installed system and its esp), ?disk=0 none */
 	disk: (q.get('disk') ?? '4096') !== '0' && navigator.storage?.getDirectory ? { name: 'sdW0', size: Number(q.get('disk') ?? 4096) * 1048576, fail: q.get('diskfail') } : null,
 	/* the disk's plan9.ini; a page's own init (?arg=) wins over its init= */
-	config: machine + (fromdisk ? iniconf(fromdisk.conf).replace(q.getAll('arg').length ? /^init=.*\n/mg : /$^/, '') : '') + q.getAll('conf').map((c) => c + '\n').join(''),
+	config: machine + (net === 'ticket' ? 'etherwait=1\n' : '') + (fromdisk ? iniconf(fromdisk.conf).replace(q.getAll('arg').length ? /^init=.*\n/mg : /$^/, '') : '') + q.getAll('conf').map((c) => c + '\n').join(''),
 	canvas: document.getElementById('screen'),
 	touchbutton: () => touchbutton,
 	screen: (([w, h]) => ({ w: Number(w) || ((q.get('console') === '1') ? 800 : innerWidth), h: Number(h) || ((q.get('console') === '1') ? 600 : innerHeight - barh) }))((q.get('screen') ?? '').split('x')),
@@ -251,9 +296,12 @@ boot(fromdisk ? fromdisk.kernel : '9wasm32.wasm', {
 	 * on loopback, the next port (tools/serve's relay: offline and the
 	 * tests)
 	 */
-	ws: location.protocol === 'https:' ? `wss://${location.host}`
+	ws: net === 'off' ? 'ws://0.0.0.0:0'
+		: location.protocol === 'https:' ? `wss://${location.host}`
 		: /^(127\.0\.0\.1|localhost|\[::1\])$/.test(location.hostname) ? `ws://${location.hostname}:${location.port ? +location.port + 1 : 8081}`
 		: 'ws://0.0.0.0:0',	/* none */
+	/* the site's network's ticket: the card's first word to the gateway (renewed by it); none, no link */
+	ticket: netauth ? { get: () => ss.get(TICKET), set: (t) => ss.set(TICKET, t), drop: () => ss.del(TICKET) } : null,
 	failfork: Number(q.get('failfork')) || 0,
 	failhelper: Number(q.get('failhelper')) || 0,
 	failrfmem: Number(q.get('failrfmem')) || 0,

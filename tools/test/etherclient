@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+"""The network's gateway tested from outside (tools/test/run ethergw):
+aux/etherws and aux/ethernetd on a wasm32 machine (A, 10.0.2.15 on
+tools/gateway -n's network, the internet beyond it 198.51.100.1), reached through tools/test/netpeer's relay on
+PORT.  A passkey in software (P-256, as an authenticator's): the origin
+checks, enrolling with an invitation (none yet, a wrong one, a used one),
+the assertion's checks (type, challenge, origin, rp, UV, counter,
+signature), then the network as a machine has it - DHCP, ARP and ping of
+the gateway, TCP out through the NAT (443 answered, 25 and the server
+itself not, a forged source not), a full network (-m 2), a ticket's second
+connection taking the first's place, an idle one ended (-i 20).  Prints what it checked; exits 1 at
+the first that is not so.
+  tools/test/etherclient PORT AUTHORIGIN MACHINEORIGIN RP SELF
+  tools/test/etherclient PORT AUTHORIGIN MACHINEORIGIN RP SELF quit    the end: A's machine stops
+"""
+import base64, hashlib, json, os, socket, struct, sys, time
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+
+PORT, AUTHO, MACHO, RP, SELF = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+NET = bytes([100, 64, 0, 0])
+GW = bytes([100, 64, 0, 1])
+INET = bytes([198, 51, 100, 1])
+
+def fail(why):
+	print('FAIL: ' + why)
+	sys.exit(1)
+
+def ok(what):
+	print('ok: ' + what)
+	sys.stdout.flush()
+
+def b64u(b):
+	return base64.urlsafe_b64encode(b).rstrip(b'=').decode()
+
+def unb64u(s):
+	return base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
+
+class WS:
+	"""a page's WebSocket: masked frames, text and binary"""
+	def __init__(self, path, origin):
+		self.s = socket.create_connection(('127.0.0.1', PORT), timeout=30)
+		key = base64.b64encode(os.urandom(16)).decode()
+		o = f'Origin: {origin}\r\n' if origin else ''
+		self.s.sendall((f'GET {path} HTTP/1.1\r\nHost: test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+			f'{o}Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n').encode())
+		r = b''
+		while b'\r\n\r\n' not in r:
+			x = self.s.recv(1)
+			if not x:
+				break
+			r += x
+		self.status = r.split(b'\r\n')[0].decode(errors='replace')
+
+	def send(self, data, text=False):
+		if isinstance(data, str):
+			data, text = data.encode(), True
+		n = len(data)
+		h = bytes([0x81 if text else 0x82]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack('>H', n))
+		m = os.urandom(4)
+		self.s.sendall(h + m + bytes(c ^ m[i % 4] for i, c in enumerate(data)))
+
+	def readn(self, n):
+		b = b''
+		while len(b) < n:
+			x = self.s.recv(n - len(b))
+			if not x:
+				raise EOFError
+			b += x
+		return b
+
+	def recv(self, timeout=10):
+		"""(op, data), or None by the timeout; EOFError at the end"""
+		self.s.settimeout(timeout)
+		try:
+			h = self.readn(2)
+		except socket.timeout:
+			return None
+		self.s.settimeout(30)
+		n = h[1] & 0x7f
+		if n == 126:
+			n = struct.unpack('>H', self.readn(2))[0]
+		elif n == 127:
+			n = struct.unpack('>Q', self.readn(8))[0]
+		d = self.readn(n)
+		if h[0] & 0x0f == 8:
+			raise EOFError
+		return h[0] & 0x0f, d
+
+	def text(self, timeout=30):
+		while True:
+			r = self.recv(timeout)
+			if r is None:
+				fail('no answer')
+			if r[0] == 1:
+				return r[1].decode()
+
+	def close(self):
+		self.s.close()
+
+class Passkey:
+	def __init__(self):
+		self.key = ec.generate_private_key(ec.SECP256R1())
+		self.id = b64u(os.urandom(16))
+		self.spki = b64u(self.key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo))
+		self.count = 0
+
+def client(type, chal, origin=AUTHO):
+	return json.dumps({'type': type, 'challenge': chal, 'origin': origin, 'crossOrigin': False}, separators=(',', ':')).encode()
+
+def authdata(rp=RP, flags=0x05, count=0):
+	return hashlib.sha256(rp.encode()).digest() + bytes([flags]) + struct.pack('>I', count)
+
+def auth(line_of):
+	"""an /auth exchange: line_of(challenge) is the page's line; the gateway's answer"""
+	w = WS('/auth', AUTHO)
+	if ' 101 ' not in w.status:
+		fail('/auth: ' + w.status)
+	t0 = time.time()
+	c = w.text(180)
+	if time.time() - t0 > 5:
+		print(f'(the challenge took {time.time() - t0:.0f} s)')
+	if not c.startswith('challenge '):
+		fail('no challenge: ' + c)
+	w.send(line_of(c[10:]))
+	a = w.text()
+	w.close()
+	return a
+
+def enroll(pk, code, rp=RP, flags=0x05, type='webauthn.create', origin=AUTHO, chal=None):
+	return auth(lambda c: f'enroll {code} {pk.id} {pk.spki} {b64u(authdata(rp, flags, 0))} {b64u(client(type, chal or c, origin))}')
+
+def login(pk, count, signer=None, flags=0x05, id=None):
+	def line(c):
+		a = authdata(RP, flags, count)
+		cl = client('webauthn.get', c)
+		sig = (signer or pk).key.sign(a + hashlib.sha256(cl).digest(), ec.ECDSA(hashes.SHA256()))
+		return f'login {id or pk.id} {b64u(a)} {b64u(cl)} {b64u(sig)}'
+	return auth(line)
+
+def expect(got, want, what):
+	if not got.startswith(want):
+		fail(f'{what}: {got!r}, not {want!r}')
+	ok(what)
+	return got
+
+def ticketof(reply):
+	return reply.split(' ', 1)[1]
+
+if len(sys.argv) > 6 and sys.argv[6] == 'quit':
+	w = WS('/auth', AUTHO)
+	w.text()
+	w.send('quit-test')
+	try:
+		w.text()
+	except (EOFError, SystemExit):
+		pass
+	sys.exit(0)
+
+# the origins: each path its own, a request without one not a page's
+for path, origin, want in [('/auth', MACHO, '403'), ('/ether', AUTHO, '403'), ('/auth', None, '403'), ('/ether', None, '403'), ('/auth', 'https://evil.example', '403'), ('/other', AUTHO, '404')]:
+	w = WS(path, origin)
+	if want not in w.status:
+		fail(f'{path} from {origin}: {w.status}')
+	w.close()
+ok('the origins: /auth only from the auth page, /ether only from the machine\'s, none without')
+
+alice = Passkey()
+# no invitations file yet (the machine makes it once it has seen this): no enrolling
+expect(enroll(alice, 'aliceinvitation0001'), 'error no invitations', 'without the invitations file, no enrolling')
+for _ in range(60):
+	r = enroll(alice, 'nosuchinvitation000')
+	if r != 'error no invitations':
+		break
+	time.sleep(1)
+expect(r, 'error no such invitation', 'an invitation that is not there')
+expect(enroll(alice, 'aliceinvitation0001', flags=0x01), 'error the user not verified', 'a passkey without user verification')
+expect(enroll(alice, 'aliceinvitation0001', flags=0x04), 'error no user present', 'a passkey without user presence')
+expect(enroll(alice, 'aliceinvitation0001', rp='evil.example'), "error not this site's passkey", 'another rp\'s passkey')
+expect(enroll(alice, 'aliceinvitation0001', origin='https://evil.example'), "error not this site's origin", 'made on another origin')
+expect(enroll(alice, 'aliceinvitation0001', type='webauthn.get'), 'error not what was asked', 'an assertion for a new one')
+expect(enroll(alice, 'aliceinvitation0001', chal=b64u(os.urandom(32))), 'error not this challenge', 'another challenge')
+ta = ticketof(expect(enroll(alice, 'aliceinvitation0001'), 'ok ', 'enrolled with an invitation: a ticket'))
+expect(enroll(Passkey(), 'aliceinvitation0001'), 'error no such invitation', 'the invitation used once only')
+expect(login(alice, 1), 'ok ', 'the passkey shown: a ticket')
+expect(login(alice, 1), 'error counter not above', 'the same counter again (a copied passkey)')
+expect(login(alice, 2, signer=Passkey()), 'error bad signature', 'another key\'s signature')
+expect(login(alice, 3, flags=0x01), 'error the user not verified', 'an assertion without user verification')
+expect(login(alice, 3, id=b64u(os.urandom(16))), 'error no such passkey', 'a passkey not enrolled')
+ta = ticketof(expect(login(alice, 4), 'ok ', 'and again'))
+bob = Passkey()
+tb = ticketof(expect(enroll(bob, 'bobinvitation000002'), 'ok ', 'another enrolled'))
+carol = Passkey()
+tc = ticketof(expect(enroll(carol, 'carolinvitation0003'), 'ok ', 'a third'))
+
+# the network
+def ether(ticket):
+	w = WS('/ether', MACHO)
+	if ' 101 ' not in w.status:
+		fail('/ether: ' + w.status)
+	w.send('ticket ' + ticket)
+	return w, w.text()
+
+w, r = ether('x' * 43)
+expect(r, 'error no such ticket', 'a ticket that is not one')
+w.close()
+
+def csum(b):
+	if len(b) % 2:
+		b += b'\0'
+	s = sum(struct.unpack(f'!{len(b)//2}H', b))
+	while s >> 16:
+		s = (s & 0xffff) + (s >> 16)
+	return ~s & 0xffff
+
+def ip4(src, dst, proto, payload):
+	h = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + len(payload), 0, 0x4000, 64, proto, 0, src, dst)
+	return h[:10] + struct.pack('!H', csum(h)) + h[12:] + payload
+
+def l4sum(src, dst, proto, seg):
+	return csum(src + dst + struct.pack('!BBH', 0, proto, len(seg)) + seg)
+
+def tcpsyn(src, dst, sport, dport):
+	t = struct.pack('!HHIIBBHHH', sport, dport, 1000, 0, 5 << 4, 0x02, 65535, 0, 0)
+	t = t[:16] + struct.pack('!H', l4sum(src, dst, 6, t)) + t[18:]
+	return ip4(src, dst, 6, t)
+
+def frame(src, dst, type, payload):
+	f = dst + src + struct.pack('!H', type) + payload
+	return f + b'\0' * max(0, 60 - len(f))
+
+MAC = bytes.fromhex('0200000000aa')
+BCAST = b'\xff' * 6
+
+def frames(w, secs):
+	"""the frames that come in secs"""
+	out, end = [], time.time() + secs
+	while time.time() < end:
+		r = w.recv(max(0.1, end - time.time()))
+		if r is None:
+			break
+		if r[0] == 2:
+			out.append(r[1])
+	return out
+
+def dhcp(w, type, want=None):
+	opts = bytes([53, 1, type]) + (bytes([50, 4]) + want if want else b'') + b'\xff'
+	b = bytes([1, 1, 6, 0]) + b'\x12\x34\x56\x78' + b'\0' * 20 + MAC + b'\0' * 10 + b'\0' * 192 + b'\x63\x82\x53\x63' + opts
+	u = struct.pack('!HHHH', 68, 67, 8 + len(b), 0) + b
+	w.send(frame(MAC, BCAST, 0x0800, ip4(b'\0' * 4, BCAST[:4], 17, u)))
+	for f in frames(w, 5):
+		if f[12:14] == b'\x08\x00' and f[14 + 9] == 17 and f[14 + 20 + 2:14 + 20 + 4] == b'\x00\x44':
+			bp = f[14 + 28:]
+			o, i = {}, 240
+			while i < len(bp) and bp[i] != 255:
+				o[bp[i]] = bp[i + 2:i + 2 + bp[i + 1]]
+				i += 2 + bp[i + 1]
+			return bp[16:20], o
+	fail('no DHCP answer')
+
+w, r = ether(ta)
+expect(r, 'ok', 'the ticket: the link up')
+yi, o = dhcp(w, 1)
+if o.get(53) != b'\x02' or yi[:3] != NET[:3] or o.get(3) != GW or o.get(1) != b'\xff\xff\xff\x00':
+	fail(f'DHCP offer: {yi.hex()} {o}')
+yi2, o = dhcp(w, 3, yi)
+if o.get(53) != b'\x05' or yi2 != yi:
+	fail(f'DHCP ack: {yi2.hex()} {o}')
+ok(f'DHCP: {".".join(map(str, yi))} on 100.64.0.0/24, the gateway .1 its router')
+_, o = dhcp(w, 3, bytes([100, 64, 0, 200]))
+if o.get(53) != b'\x06':
+	fail('DHCP: another address asked, not refused')
+ok('DHCP: another address asked for, refused')
+
+arp = struct.pack('!HHBBH6s4s6s4s', 1, 0x0800, 6, 4, 1, MAC, yi, b'\0' * 6, GW)
+w.send(frame(MAC, BCAST, 0x0806, arp))
+gwmac = None
+for f in frames(w, 3):
+	if f[12:14] == b'\x08\x06' and f[20:22] == b'\x00\x02' and f[28:32] == GW:
+		gwmac = f[22:28]
+if not gwmac:
+	fail('no ARP answer for the gateway')
+ok('ARP: the gateway answers')
+arp = struct.pack('!HHBBH6s4s6s4s', 1, 0x0800, 6, 4, 1, MAC, yi, b'\0' * 6, INET)
+w.send(frame(MAC, BCAST, 0x0806, arp))
+if any(f[12:14] == b'\x08\x06' for f in frames(w, 2)):
+	fail('ARP: an answer for another host')
+ok('ARP: nothing for another host (all through the gateway)')
+
+icmp = struct.pack('!BBHHH', 8, 0, 0, 7, 1) + b'ping'
+icmp = icmp[:2] + struct.pack('!H', csum(icmp)) + icmp[4:]
+w.send(frame(MAC, gwmac, 0x0800, ip4(yi, GW, 1, icmp)))
+if not any(f[14 + 9] == 1 and f[14 + 20] == 0 and f[14 + 12:14 + 16] == GW for f in frames(w, 3)):
+	fail('the gateway does not answer a ping')
+ok('ping: the gateway answers')
+
+def syn(src, dst, dport, secs=3):
+	sport = 40000 + dport % 1000 + int.from_bytes(os.urandom(1), 'big')
+	w.send(frame(MAC, gwmac, 0x0800, tcpsyn(src, dst, sport, dport)))
+	for f in frames(w, secs):
+		ip = f[14:]
+		if ip[9] == 6 and ip[12:16] == dst:
+			t = ip[(ip[0] & 15) * 4:]
+			if struct.unpack('!HH', t[:4]) == (dport, sport):
+				return t[13]
+	return None
+
+fl = syn(yi, INET, 443)
+if fl is None or fl & 0x12 != 0x12:
+	fail(f'TCP to 198.51.100.1!443: {fl}')
+ok('TCP out through the NAT: 198.51.100.1!443 answers (SYN ACK)')
+if syn(yi, INET, 25) is not None:
+	fail('TCP to port 25 went through')
+ok('TCP to port 25: dropped')
+selfip = bytes(map(int, SELF.split('.')))
+if syn(yi, selfip, 443) is not None:
+	fail('TCP to the server itself went through')
+ok('TCP to the server itself: dropped')
+if syn(bytes([100, 64, 0, 99]), INET, 443) is not None:
+	fail('a forged source went through')
+ok('a forged source address: dropped')
+
+# one machine a name, -m 2 at once
+wb, r = ether(tb)
+expect(r, 'ok', 'another name: a second machine')
+wc, r = ether(tc)
+expect(r, 'error the network is full', 'a third, past -m 2: the network is full')
+wc.close()
+w2, r = ether(ta)
+expect(r, 'ok', 'the first name\'s ticket again: it takes the old connection\'s place')
+t0 = time.time()
+try:
+	while time.time() - t0 < 20:
+		w.recv(1)
+	fail('the old connection was not closed')
+except EOFError:
+	pass
+ok('the old connection closed')
+yi3, o = dhcp(w2, 3, yi)
+if o.get(53) != b'\x05':
+	fail('the new connection does not have the old one\'s address')
+ok('the new connection has the old one\'s address')
+w2.close()
+# the second machine has sent nothing: past A's -i (20 s) it is ended
+t0 = time.time()
+try:
+	while time.time() - t0 < 60:
+		wb.recv(1)
+	fail('an idle connection was not closed')
+except EOFError:
+	pass
+ok('an idle connection closed')
+print('PASS: the gateway')

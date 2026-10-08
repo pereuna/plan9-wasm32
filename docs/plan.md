@@ -78,13 +78,26 @@ own; "9front" here means that project.  It is installed and booted as
    confignet as on a PC.  Its wire is a WebSocket to the origin's /ether;
    tools/gateway is the other end - a switch and a TAP, a network of its
    own with DHCP (-n) for offline and the tests, or the host's (-t).
-   https://plan2001.com/plan9-wasm32/ has no gateway yet: the card is there,
-   its link down.
-8. The distribution as 9front's (in progress, 2026-10-07): the tree
+   https://plan2001.com/plan9-wasm32/'s gateway is step 9's.
+8. The distribution as 9front's (done, 2026-10-08): the tree
    branch (tools/treebranch), a snapshot of 9front's release and this tree; the ISO
    (tools/dist) its files and .git, the base system and the tools built
    (tools/dist.base); installed from a local copy of the ISO, then bind
    -ac /dist/9front /; cd /sys/src; mk install on the machine - the build
    is the PoC's test, people's to run; tools/test/run dist installs the
-   ISO and checks its git and a small build.  Next: the ISO on
-   plan2001.com/iso; git/pull from GitHub through a gateway with a way out.
+   ISO and checks its git and a small build.  The ISO is on
+   plan2001.com/iso, the front page has its CD, power, BIOS and help.
+9. The site's network (in progress, 2026-10-08; docs/network.md): a
+   machine on plan2001.com reaches the internet (the web and git) through
+   the server once its owner has shown a passkey - auth.plan2001.com, an
+   origin apart from the machine's, the firmware asking before the disk's
+   runs; a ticket for the tab.  The server's end is 9front's own:
+   aux/ethernetd (DHCP, a filter, limits, a log; a pkt interface and the
+   stack's NAT) and aux/etherws (sys/src/cmd/ethergw); tools/test/run
+   ethergw tests it on a machine.  The server's side to do:
+   docs/plan2001-server.md.  Found on the way, open: after
+   rfork(RFPROC|RFFDG|RFMEM) the parent's read of a TCP connection
+   (listen1's, fd 0) never returned, though the data was there (etherws
+   forks without RFMEM, so it does not meet it); and alarm() did not
+   interrupt a libthread proc's read of a pipe (ethernetd's timer has no
+   notes).

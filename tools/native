@@ -102,7 +102,7 @@ fi
 # those programs (sys/src/9/wasm32/bootfs.proto)
 libs="libc libthread libmp libsec libbio libregexp libString libauth libauthsrv lib9p libip libndb libdraw libmemdraw libmemlayer libframe libcomplete libplumb libcontrol libflate libdisk libavl"
 one="basename cat cleanname cp date dd echo ls mkdir mv rm sleep sort touch wc xd bind unmount ns sed mount pwd ps read test chmod tlsclient mntgen ramfs tar stats webcookies clock"
-cmds="cmd/rc cmd/hjfs cmd/rio cmd/aux/kbdfs cmd/auth/factotum cmd/auth/secstore:secstore.install,aescbc.install cmd/aux/seckeys cmd/exportfs cmd/plumb cmd/disk/prep cmd/disk:format.install,mkfs.install,mkext.install cmd/dossrv cmd/9660srv cmd/gefs cmd/cwfs cmd/gzip:gunzip.install cmd/webfs cmd/ip/ipconfig cmd/ip:ping.install cmd/ndb:cs.install cmd:$(echo $one | sed 's/\([^ ]*\)/\1.install/g; s/ /,/g')"
+cmds="cmd/rc cmd/hjfs cmd/rio cmd/aux/kbdfs cmd/auth/factotum cmd/auth/secstore:secstore.install,aescbc.install cmd/aux/seckeys cmd/exportfs cmd/plumb cmd/disk/prep cmd/disk:format.install,mkfs.install,mkext.install cmd/dossrv cmd/9660srv cmd/gefs cmd/cwfs cmd/gzip:gunzip.install cmd/webfs cmd/ip/ipconfig cmd/ip:ping.install cmd/ndb:cs.install cmd/aux:listen1.install,dial.install cmd/ethergw cmd:$(echo $one | sed 's/\([^ ]*\)/\1.install/g; s/ /,/g')"
 dirs=${*:-$libs 9/wasm32 $cmds}
 # /lib/ucd: libc/ucd's tables are made from it, but they come made (its *data
 # files); stand-ins older than the tables.  aux/kbdfs's latin1.h, made from

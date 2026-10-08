@@ -79,7 +79,12 @@ case local!*
 rm -f '/env/fn#root'
 
 # the network, as termrc's for a machine its ndb knows: DHCP on the card (etherwasm32.c)
-# if its gateway is there, the link up; and cs
+# if its gateway is there, the link up; and cs.  $etherwait (the page has a ticket for the
+# site's network, docs/network.md): the link comes up once the gateway has taken it - a while
+if(test -e /net/ether0 && ! ~ $#etherwait 0)
+	for(i in 1 2 3 4 5 6 7 8 9 10)
+		if(! ~ `{sed -n 's/^link: //p' /net/ether0/stats} 1)
+			sleep 1
 if(test -e /net/ether0 && ~ `{sed -n 's/^link: //p' /net/ether0/stats} 1)
 	ip/ipconfig ether /net/ether0 >[2]/dev/null
 ndb/cs

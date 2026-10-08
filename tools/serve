@@ -9,7 +9,7 @@
 # if it has one).  A Range request gets that part (206): the ISO, the
 # machine's read-only disk.  Offline, and the tests' page server.
 #   tools/serve [-d DIR] [-g GATEWAY] [PORT]	default 18300, 17080
-import asyncio, http.server, os, re, sys, threading
+import asyncio, http.server, os, re, sys, threading, urllib.parse
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 args = sys.argv[1:]
 d = os.path.join(root, 'build/live')
@@ -45,7 +45,10 @@ class H(http.server.SimpleHTTPRequestHandler):
 			p += 'index.html'
 		if p == '/plan9.ini' and os.environ.get('PLAN9INI') is not None:
 			return self.body((os.environ['PLAN9INI'] + '\n').encode(), 'text/plain')
-		f = os.path.join(d, p.lstrip('/'))
+		# the file, within DIR only (.. or a link out of it is not there): before Range and gzip
+		f = os.path.realpath(os.path.join(d, urllib.parse.unquote(p).lstrip('/')))
+		if os.path.commonpath([f, os.path.realpath(d)]) != os.path.realpath(d):
+			return self.send_error(404)
 		rng = re.match(r'bytes=(\d+)-(\d*)$', self.headers.get('Range', ''))
 		if rng and os.path.isfile(f):	# a part of it: the distribution's ISO, the machine's read-only disk
 			size = os.path.getsize(f)

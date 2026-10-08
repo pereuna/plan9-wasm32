@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plan2001.com network</title>
+<meta name="description" content="A passkey for the plan2001.com machines' network.">
+<style>
+	:root { --bg: #f4f1ea; --fg: #1d1d1b; --dim: #6b6862; --ring: #1d1d1b; --face: #fffdf8; --bad: #b3261e; }
+	@media (prefers-color-scheme: dark) {
+		:root { --bg: #151514; --fg: #e9e6df; --dim: #8d8a83; --ring: #e9e6df; --face: #22221f; --bad: #f2b8b5; }
+	}
+	html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--fg); }
+	body { display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;
+		font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; min-height: 100vh; }
+	main { background: var(--face); border: 3px solid var(--ring); border-radius: 18px; padding: 22px 26px; max-width: 26em; width: 100%; box-sizing: border-box; }
+	h1 { font-size: 19px; margin: 0 0 10px; }
+	h2 { font-size: 15px; margin: 18px 0 6px; }
+	p { margin: 0 0 10px; }
+	.dim { color: var(--dim); font-size: 13px; }
+	input { font: 14px ui-monospace, monospace; width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 8px; border: 2px solid var(--ring); background: var(--bg); color: var(--fg); margin: 0 0 8px; }
+	button { font: inherit; padding: 7px 14px; border-radius: 10px; border: 2px solid var(--ring); background: var(--bg); color: var(--fg); cursor: pointer; }
+	button.main { background: var(--fg); color: var(--bg); }
+	button:disabled { opacity: .5; cursor: default; }
+	#status { min-height: 1.4em; margin-top: 14px; }
+	#status.bad { color: var(--bad); }
+	a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+	<h1>The machine's network</h1>
+	<p>Your machine reaches the internet through plan2001.com: the web and git. A passkey on this device says it is yours.</p>
+	<button id="login" class="main">Sign in with the passkey</button>
+	<h2>The first time</h2>
+	<p class="dim">With an invitation code: a passkey made for this site, on this device or your phone.</p>
+	<input id="invite" placeholder="invitation code" autocomplete="off" autocapitalize="off" spellcheck="false">
+	<button id="enroll">Make the passkey</button>
+	<p id="status" role="status"></p>
+	<p class="dim"><a id="back" href="/">Back to the machine, without the network</a></p>
+</main>
+<script>
+/*
+ * The site's network's passkeys (docs/network.md): this page is its own origin
+ * (auth.SITE), apart from the machine's (SITE): the passkeys are this host's (rp), which
+ * the machine's page - its disk's firmware among it - can not ask for.  Over a WebSocket to
+ * the gateway (/auth: aux/etherws, aux/ethernetd): its challenge, a passkey made with an
+ * invitation (enroll) or one shown (login), its ticket; then the tab goes back to the
+ * machine (SITE/plan9-wasm32/) with #ticket=T: this site's own, not one a URL names.  On
+ * localhost (the tests): the machine 127.0.0.1, the WebSocket the next port (tools/serve's)
+ */
+const local = location.hostname === 'localhost';
+const machine = local ? `http://127.0.0.1:${location.port}/` : `https://${location.hostname.replace(/^auth\./, '')}/plan9-wasm32/`;
+const wsurl = location.protocol === 'https:' ? `wss://${location.host}/auth` : `ws://${location.hostname}:${+location.port + 1}/auth`;
+document.getElementById('back').href = machine;
+const status = document.getElementById('status');
+const say = (t, bad) => { status.textContent = t; status.classList.toggle('bad', !!bad); };
+const b64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+
+/* the gateway's challenge, and a way to its answer */
+function session() {
+	return new Promise((done, fail) => {
+		const ws = new WebSocket(wsurl);
+		const waiting = [];
+		ws.onmessage = (e) => {
+			const m = String(e.data);
+			if (m.startsWith('challenge ')) done({ chal: unb64u(m.slice(10)), answer: (line) => new Promise((ok) => { waiting.push(ok); ws.send(line); }), ws });
+			else waiting.shift()?.(m);
+		};
+		ws.onerror = () => fail(new Error('the network is not there'));
+		ws.onclose = () => { while (waiting.length) waiting.shift()('error the connection closed'); };
+	});
+}
+
+function done(reply) {
+	if (!reply.startsWith('ok ')) {
+		say(reply.replace(/^error /, 'Not taken: '), true);
+		return;
+	}
+	try { localStorage.setItem('plan2001 network passkey', '1'); } catch (e) {}
+	say('Taken: back to the machine.');
+	location.replace(machine + '#ticket=' + reply.slice(3));
+}
+
+async function run(what) {
+	const buttons = document.querySelectorAll('button');
+	buttons.forEach((b) => b.disabled = true);
+	say(what === 'login' ? 'The passkey...' : 'Making the passkey...');
+	let s;
+	try {
+		s = await session();
+		if (what === 'login') {
+			const a = await navigator.credentials.get({ publicKey: { challenge: s.chal, rpId: location.hostname, userVerification: 'required', timeout: 120000 } });
+			done(await s.answer(['login', a.id, b64u(a.response.authenticatorData), b64u(a.response.clientDataJSON), b64u(a.response.signature)].join(' ')));
+		} else {
+			const code = document.getElementById('invite').value.trim();
+			if (!/^[A-Za-z0-9_-]{16,128}$/.test(code)) throw new Error('that is not an invitation code');
+			const c = await navigator.credentials.create({ publicKey: {
+				rp: { id: location.hostname, name: 'plan2001.com network' },
+				user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'plan2001.com network', displayName: 'plan2001.com network' },
+				challenge: s.chal,
+				pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+				authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+				attestation: 'none',
+				timeout: 120000,
+			} });
+			const spki = c.response.getPublicKey?.();
+			if (!spki) throw new Error('this browser does not give the passkey\'s key');
+			done(await s.answer(['enroll', code, c.id, b64u(spki), b64u(c.response.getAuthenticatorData()), b64u(c.response.clientDataJSON)].join(' ')));
+		}
+	} catch (e) {
+		say(e.name === 'NotAllowedError' ? 'No passkey: cancelled, or none for this site.' : String(e.message || e), true);
+	} finally {
+		s?.ws.close();
+		buttons.forEach((b) => b.disabled = false);
+	}
+}
+document.getElementById('login').addEventListener('click', () => run('login'));
+document.getElementById('enroll').addEventListener('click', () => run('enroll'));
+document.getElementById('invite').addEventListener('keydown', (e) => { if (e.key === 'Enter') run('enroll'); });
+</script>
+</body>
+</html>
