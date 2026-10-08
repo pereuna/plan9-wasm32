@@ -24,6 +24,8 @@
 	.v { white-space: nowrap; }
 	footer { color: var(--dim); font-size: 12px; text-align: center; max-width: 36em; }
 	footer a { display: inline; padding: 0; text-decoration: underline; }
+	footer p { margin: 0 0 10px; }
+	footer code { font: 12px ui-monospace, monospace; white-space: nowrap; }
 	#power .led { fill: var(--dim); transition: fill .15s; }
 	#power:hover .led, #power:focus-visible .led { fill: var(--glow); }
 </style>
@@ -60,10 +62,12 @@
 	</a>
 </main>
 <footer>
-	9front for the wasm32 architecture: the web browser is the machine.
-	Install from the ISO, then build the rest on the machine from its source.
-	<a href="https://github.com/pereuna/plan9-wasm32">Source</a> · <span class="v">@VERSION@</span>
-	<br>Plan 9 is a trademark of the Plan 9 Foundation; this project is not affiliated with it.
+	<p>9front for the wasm32 architecture: the web browser is the machine.</p>
+	<p>The install is <a href="https://fqa.9front.org/fqa4.html">9front's</a> (inst/start), except that
+	copydist copies the base system, the tools and the source with its git, not the whole system built:
+	the rest is the machine's to build &mdash; <code>bind -ac /dist/9front /; cd /sys/src; mk install</code></p>
+	<p><a href="https://github.com/pereuna/plan9-wasm32">Source</a> · <span class="v">@VERSION@</span><br>
+	Plan 9 is a trademark of the Plan 9 Foundation; this project is not affiliated with it.</p>
 </footer>
 </body>
 </html>

@@ -5,9 +5,11 @@
 # build/dist, onto the cloud server over the administrators' WireGuard
 # tunnel (Plan2001's tools/cloud/wg-admin up, with sudo) by tools/site/site.rc
 # there, through Plan2001's 9pterm and its admin password.
-#   tools/site/deploy [ADMIN-IP]	default 10.201.0.1; PLAN2001=~/Plan2001
+#   tools/site/deploy [-p] [ADMIN-IP]	-p the front page alone; default 10.201.0.1; PLAN2001=~/Plan2001
 set -e
 here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$(dirname "$here")")
+live=/mnt/term$root/build/dist/live iso=/mnt/term$root/build/dist/plan9-wasm32.iso
+[ "${1:-}" != -p ] || { live=- iso=-; shift; }
 admin=${1:-10.201.0.1}
 p2001=${PLAN2001:-$HOME/Plan2001}
 sec=${PLAN2001_CACHE:-$HOME/.cache/plan2001}/cloud
@@ -23,7 +25,7 @@ size=$(( $(stat -c %s "$d/plan9-wasm32.iso") / 1048576 ))
 v="tree $(git -C "$root" rev-parse --short tree) · $(date -u +%Y-%m-%d)"
 sed "s|@ISO@|plan9-wasm32.iso, $size MB|; s|@VERSION@|$v|" "$here/index.html" >"$s/index.html"
 out=$("$T" -h "$admin" -a "tcp!$admin!567" -u admin -P "$sec/admin.pass" -W 20 -T "${TMO:-7200}" \
-	-c "rc /mnt/term$here/site.rc /mnt/term$s/index.html /mnt/term$d/live /mnt/term$d/plan9-wasm32.iso" 2>&1 || true)
+	-c "rc /mnt/term$here/site.rc /mnt/term$s/index.html $live $iso" 2>&1 || true)
 echo "$out"
 echo "$out" | grep -q SITE-DONE || { echo "deploy: not installed" >&2; exit 1; }
 echo "deploy: https://plan2001.com/"
