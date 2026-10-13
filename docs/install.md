@@ -45,7 +45,14 @@ passt's):
 
     bind -ac /dist/9front /
     cd / && git/pull            # origin: https://github.com/pereuna/plan9-wasm32, branch tree
+    cd /sys/src/cmd
+    for(i in cc 3c 3a 3l cpp mk) @{cd $i && mk install}
+    mk pcc.install yacc.install # the tools first
     cd /sys/src && mk install
+
+The tools first, as 9front's 386 was built after a pull: the source may
+want of its compilers what the ones the machine has do not know yet (APE
+needed pcc's wasm32 and 3l's $M, 2026-10-13).
 
 A machine without `/dist/9front` gets it with
 `git/clone -b tree https://github.com/pereuna/plan9-wasm32 /dist/9front`.
