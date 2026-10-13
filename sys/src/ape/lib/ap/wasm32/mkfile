@@ -1,0 +1,17 @@
+APE=/sys/src/ape
+<$APE/config
+LIB=/$objtype/lib/ape/libap.a
+
+# what 386 has in assembler, wasm32 has in C; setjmp and longjmp are
+# 3l's (WebAssembly exceptions), sigsetjmp <setjmp.h>'s
+# (/wasm32/include/ape), the string functions gen's
+OFILES=\
+	cycles.$O\
+	lock.$O\
+	main9.$O\
+	notetramp.$O\
+	tas.$O\
+
+</sys/src/cmd/mksyslib
+
+CFLAGS=-c -D_POSIX_SOURCE -D_PLAN9_SOURCE

@@ -1,0 +1,10 @@
+ticks in it: ok
+argv[0] ape
+argv[1] a
+argv[2] b c
+42 -7 1099511627776 3.250 hello
+pid ok
+setjmp 5
+sigsetjmp 7, signal SIGINT
+child exit 3
+done
