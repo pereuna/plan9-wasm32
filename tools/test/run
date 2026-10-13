@@ -11,7 +11,8 @@
 #   4096 bytes), fork, forkloop (2000 forks), rc, rci, c3a (notes,
 #   rendezvous), failfork (a child without a Worker), rfmem, threads,
 #   preempt, rfmemloop, failhelper, failrfmem (rfork(RFMEM) undone),
-#   init (/boot/console: kbdfs, rc, äåö, DEL), procargs, notekill, fault
+#   init (/boot/console: kbdfs, rc, äåö, DEL), procargs, notekill, fault,
+#   ape (APE's libraries, pcc)
 # - the screen, keyboard and mouse: clock, keys, mouse, hello, dclock,
 #   bytes, rc3, rci3 (3c's tests), rioclock, riorc, boot (/boot/init as
 #   9front's: glenda's profile, rio, stats), ctrlv, touchbar, paste
@@ -35,7 +36,7 @@ site=$root/build/test/site
 mkdir -p "$root/build/test"
 if [ -z "${NOBUILD:-}" ]; then
 	"$root/tools/build" >"$root/build/test/build.log" 2>&1 || { tail -20 "$root/build/test/build.log"; exit 1; }
-	TREE=$tree "$root/tools/native" 9/wasm32/test:all >"$root/build/test/native.log" 2>&1 || { tail -20 "$root/build/test/native.log"; exit 1; }
+	TREE=$tree "$root/tools/native" ape:lib.install 9/wasm32/test:all >"$root/build/test/native.log" 2>&1 || { tail -20 "$root/build/test/native.log"; exit 1; }
 fi
 rm -rf "$site"; mkdir -p "$site"
 cp "$root/build/live/index.html" "$root/build/live/platform.js" "$root/build/live/9wasm32.wasm" "$site/"
@@ -114,6 +115,8 @@ want tls $names && run tls '["/bin/d4"]'
 want procargs $names && run procargs "[\"/bin/rc\", \"-c\", \"d4 -a; rc -c 'echo -n somehost >/proc/\$pid/args; cat /proc/\$pid/args; echo; exec cat /proc/\$pid/args'; echo; echo done\"]"
 # rfork(RFMEM) procs in rendezvous ended by their group's kill, with and without a handler (exportfs's ending)
 want notekill $names && run notekill '["/bin/rc", "-c", "echo mem nohandler; d4 -k mn; echo fork handler; d4 -k h; echo mem handler; d4 -k; echo done"]'
+# APE (/sys/src/ape, pcc): main's argv and environment, stdio, setjmp, a signal left with siglongjmp, fork and wait
+want ape $names && run ape "$(rcjson "apetest=hello ape a 'b c'; echo done")"
 # the disk (#S/sdW0, OPFS; /boot/disk: hjfs on it, all of glenda's home): files written, one in a
 # directory the root has too (lib), her profile changed; hjfs synced and the disk flushed; the page
 # loaded again in the same browser (THEN) - the files are there, the root's skeleton too, and her

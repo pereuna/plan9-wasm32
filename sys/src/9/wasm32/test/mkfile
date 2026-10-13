@@ -7,7 +7,7 @@ TESTS=c3a c3b c3d d2 d3 d4 d5 fault forkloop
 CTESTS=hello fork dclock rfmem threads bytes preempt
 CFLAGS=-FVw
 
-all:V:	${TESTS:%=$O.%} ${CTESTS:%=$O.%}
+all:V:	${TESTS:%=$O.%} ${CTESTS:%=$O.%} $O.ape
 
 install:V:	all
 
@@ -25,6 +25,10 @@ $O.%:	%.$O
 
 ^(rfmem|threads|bytes|preempt)\.3$:R:	/sys/src/cmd/3c/test/host3/\1.c
 	$CC $CFLAGS -o $target $prereq
+
+# APE's (pcc): /sys/src/ape
+$O.ape:	ape.c
+	pcc -o $target -D_POSIX_SOURCE -D_PLAN9_SOURCE ape.c
 
 clean:V:
 	rm -f *.[$OS] [$OS].*

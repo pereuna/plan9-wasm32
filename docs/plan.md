@@ -87,6 +87,10 @@ own; "9front" here means that project.  It is installed and booted as
    is the PoC's test, people's to run; tools/test/run dist installs the
    ISO and checks its git and a small build.  The ISO is on
    plan2001.com/iso, the front page has its CD, power, BIOS and help.
+   The machine's mk install stopped at /sys/src/ape, before cmd: APE
+   had no wasm32 (pcc's objtypes, ap/wasm32, lib9's, the syscall stubs,
+   /wasm32/include/ape), and the ISO no /wasm32/lib/ape, bin/ape ...
+   Ported 2026-10-13; tools/test/run ape.
 9. The site's network (in progress, 2026-10-08; docs/network.md): a
    machine on plan2001.com reaches the internet (the web and git) through
    the server once its owner has shown a passkey - auth.plan2001.com, an

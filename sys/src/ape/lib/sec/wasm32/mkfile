@@ -1,0 +1,9 @@
+APE=/sys/src/ape
+<$APE/config
+
+objtype=wasm32
+</$objtype/mkfile
+
+# wasm32 has no assembler of its own: all of it is port's C
+install clean all update:V:
+	# nothing

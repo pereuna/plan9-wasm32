@@ -28,7 +28,7 @@ libs=$(cd "$tree/sys/src" && ls -d lib* | grep -v '^libc$')
 # on past what fails (9front's mkfiles loop over a directory's directories with rc -e: the
 # first failure ends the loop)
 TREE=$tree "$here/native" >"$d/build.log" 2>&1 || { tail -20 "$d/build.log"; echo "dist: the boot file system's programs failed (build/dist/build.log)" >&2; exit 1; }
-TREE=$tree MKFLAGS=-k "$here/native" libc $libs cmd games 9/wasm32 >>"$d/build.log" 2>&1 || true
+TREE=$tree MKFLAGS=-k "$here/native" libc $libs ape cmd games 9/wasm32 >>"$d/build.log" 2>&1 || true
 # aux's and ip's own programs (aux/listen, aux/timesync ...): their install waits for their
 # directories' (installdirs), whose rc loop ends at the first that fails; each, as mkmany installs it
 for dd in cmd/aux cmd/ip; do
@@ -85,6 +85,10 @@ for dp, dn, fn in os.walk(rel):
 		shutil.copy2(os.path.join(rel, f), os.path.join(out, f))
 ' "$rel" "$out" "$here/dist.deny"
 mkdir -p "$out/tmp" "$out/dist/9front" "$out/usr/glenda/bin/wasm32" "$out/wasm32/bin"
+# /$objtype's directories as 9front's ISO has them for amd64 (bin/ape, bin/games, lib/ape ...),
+# and acme's: where the machine's mk install puts what it builds
+(cd "$rel/amd64" && find bin lib -mindepth 1 -type d) | while read -r b; do mkdir -p "$out/wasm32/$b"; done
+mkdir -p "$out/acme/bin/wasm32"
 python3 -I - "$here/dist.base" "$tree/wasm32/bin" "$out/wasm32/bin" <<'PY'
 import os, shutil, sys
 lst, src, dst = sys.argv[1:]

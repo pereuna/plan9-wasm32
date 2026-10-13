@@ -1,0 +1,27 @@
+--- a/sys/src/ape/lib/ap/syscall/genall
++++ b/sys/src/ape/lib/ap/syscall/genall
+@@ -10,7 +10,23 @@
+ for(I in $SYS) {
+ 	i=_^$I
+ 	n=`{sed -n '/[ 	]'$I'[ 	]/s/.*	//p' $SYSH}
+-	./gencall
++	if(~ $objtype wasm32){
++		# no system call instruction: the platform's _trap, as libc's
++		# stubs (/sys/src/libc/9syscall/mkfile)
++		{
++			echo 'typedef long long vlong;'
++			echo 'extern vlong _trap(int, void*);'
++			echo 'vlong'
++			echo $i'(void *a)'
++			echo '{'
++			echo '	return _trap('$n', &a);'
++			echo '}'
++		} > $i.c
++		$CC $CFLAGS $i.c
++	}
++	if not
++		./gencall
+ }
+ ar vu /$objtype/lib/ape/libap.a *.$O
+ rm -f *.$O *.s
++if(~ $objtype wasm32) rm -f *.c

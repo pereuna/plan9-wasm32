@@ -19,11 +19,13 @@ A binary base, the tools, and the whole source with its git:
   for wasm32 only the base system and the tools (`tools/dist.base`: the
   file servers, rc and the commands the live system, termrc, rio and
   inst/start run, the network, an editor; 3c/3a/3l, mk, yacc, lex, ar,
-  pcc, git), the libraries and the boot materials - and in
+  pcc, git), the libraries (APE's too: /wasm32/lib/ape) and the boot
+  materials, the directories mk install puts the rest in (/wasm32/bin/ape,
+  games ...) - and in
   `/dist/9front/.git` the branch, its work tree the root, as 9front's
   ISO has its repository.  `tools/dist` builds the whole
-  release here too (`build/dist/failed`: what does not build yet, mostly
-  APE programs): a check of the source, and where the base comes from.
+  release here too (`build/dist/failed`: what does not build yet): a
+  check of the source, and where the base comes from.
 - **On the site** the ISO is `https://plan2001.com/iso/`, as 9front's is
   `9front.org/iso/`: downloaded once, installed from the computer it is
   on (`?iso=file`).  The page and its kernel come from the site, as a

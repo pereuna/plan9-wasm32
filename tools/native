@@ -82,6 +82,15 @@ if [ -e "$tree/sys/src/cmd/cpp/cpp.c" ] && [ ! -x "$bin/cpp" ]; then
 		{ echo "native: cpp" >&2; exit 1; }
 	rm -rf "$m"
 fi
+# pcc, APE's cc (cpp, then 3c; 3l): the tree's, built for the host with
+# plan9port, running the host's cpp, 3c and 3l (here) - not /bin's
+if [ -e "$tree/sys/src/cmd/pcc.c" ] && { [ ! -x "$bin/pcc" ] || [ "$tree/sys/src/cmd/pcc.c" -nt "$bin/pcc" ]; }; then
+	m=$(mktemp -d)
+	sed "s|\"/bin/cpp\"|\"$bin/cpp\"|g; s|smprint(\"/bin/%s\"|smprint(\"$bin/%s\"|g" "$tree/sys/src/cmd/pcc.c" >"$m/pcc.c"
+	grep -q "\"$bin/cpp\"" "$m/pcc.c" && ! grep -q '"/bin/' "$m/pcc.c" || { echo "native: pcc.c: its /bin is not where it was" >&2; exit 1; }
+	(cd "$m" && PATH=$PLAN9/bin:$PATH 9c pcc.c && PATH=$PLAN9/bin:$PATH 9l -o "$bin/pcc" pcc.o) || { echo "native: pcc" >&2; exit 1; }
+	rm -rf "$m"
+fi
 # aux/kbdfs's latin1.h, made from /lib/keyboard by mklatin, a program for
 # the host: the release does not ship it; made here with plan9port
 k=$tree/sys/src/cmd/aux/kbdfs
@@ -126,6 +135,26 @@ if command -v bwrap >/dev/null; then
 		[ -e "$tree/$n" ] && [ -d "$tree/$n" ] && [ ! -e "/$n" ] && continue	# the tree's, below
 		if [ -L "$d" ]; then wrap+=(--symlink "$(readlink "$d")" "$d"); elif [ -d "$d" ]; then wrap+=(--bind "$d" "$d"); fi
 	done
+	# what the build wants of the host's / that is not there, over the
+	# directory it would be in: /bin/rc, the interpreter of the source's
+	# scripts (#!/bin/rc: APE's syscall/genall), plan9port's; /lib/ucd and
+	# /lib/keyboard, the stand-ins (bound over the host's, below)
+	ov=$ucd.over
+	trap 'rm -rf "$ucd" "$ov"' EXIT
+	while read -r f t; do
+		[ ! -e "$f" ] || continue
+		d=$(readlink -f "$(dirname "$f")")
+		mkdir -p "$ov$d"
+		ln -s "$t" "$ov$d/$(basename "$f")"
+	done <<-Y
+		/bin/rc $PLAN9/bin/rc
+		/lib/ucd $ucd
+		/lib/keyboard $ucd/keyboard
+	Y
+	for d in $( [ ! -d "$ov" ] || (cd "$ov" && find . -type l -printf '%h\n' | sort -u) ); do
+		d=${d#.}
+		wrap+=(--overlay-src "$d" --overlay-src "$ov$d" --ro-overlay "$d")
+	done
 	wrap+=(--bind "$tree/sys" /sys --bind "$ucd" "$ucd")
 	for d in "$tree"/*; do
 		n=$(basename "$d")
@@ -169,6 +198,7 @@ for d in "$@"; do
 	mkdir -p /wasm32/bin/aux /wasm32/bin/auth /wasm32/bin/games /wasm32/bin/ip /wasm32/bin/disk /wasm32/bin/ndb /wasm32/bin/fs
 	# /$objtype/bin's directories as 9front has them for amd64 (venti, upas, replica ...), and acme's
 	[ ! -d /amd64/bin ] || (cd /amd64/bin && find . -mindepth 1 -type d) | while read -r b; do mkdir -p "/wasm32/bin/$b"; done
+	mkdir -p /wasm32/lib/ape
 	[ ! -d /acme/bin ] || mkdir -p /acme/bin/wasm32
 	cd "/sys/src/$d" || { echo "native: no /sys/src/$d" >&2; exit 1; }
 	mk ${MKFLAGS:-} $t

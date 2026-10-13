@@ -586,10 +586,17 @@ addlib(char *name)
 	char *path, *b, *ob, *ot, *d, buf[256];
 	int i;
 
-	/* $O is the object's letter, as Plan 9's loaders read it (cc.h: ../cc/cc.a$O) */
-	for(d = buf; *name && d < buf+sizeof buf-2; name++)
+	/*
+	 * $O is the object's letter, $M the machine's name, as Plan 9's
+	 * loaders read them (cc.h: ../cc/cc.a$O; APE's: /$M/lib/ape/libap.a)
+	 */
+	for(d = buf; *name && d < buf+sizeof buf-8; name++)
 		if(name[0] == '$' && name[1] == 'O') {
 			*d++ = '3';
+			name++;
+		} else if(name[0] == '$' && name[1] == 'M') {
+			strcpy(d, "wasm32");
+			d += 6;
 			name++;
 		} else
 			*d++ = *name;

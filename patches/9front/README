@@ -35,6 +35,16 @@ inst-bootsetup-9fat.diff
 		and not into plan9.ini what the firmware says each boot
 		(wasm32's *sdWn=, its disks' registers; init=, iso=).  2026-10-06.
 
+pcc-wasm32.diff
+		pcc.c: wasm32 in its objtypes (3c, 3l, .3), and 3 among the
+		object letters it knows.  2026-10-13.
+
+ape-syscall-wasm32.diff
+		ape/lib/ap/syscall/genall: APE's system call stubs on
+		wasm32 are C, as libc's (libc-9syscall-wasm32.diff): gencall
+		takes the other machines' assembler from libc's mkfile, which
+		has none for wasm32.  2026-10-13.
+
 The libc and libthread ones are for building wasm32 with 9front's mkfiles, with this
 tree's libc/wasm32/mkfile and libmp's, libsec's empty wasm32/mkfiles.
 wasm32 is not in 9front's CPUS: mk installall builds the CPUS, and wasm32
